@@ -1,0 +1,13 @@
+# 环境变量配置文件
+.env
+
+# 其他现有的忽略规则
+__pycache__/
+/testdata/
+/.idea/
+/utils/chatroom.db
+/seagent_vue/node_modules
+/seagent_vue/.idea
+/.vscode/
+chatroom.db
+/vector_db/

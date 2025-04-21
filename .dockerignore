@@ -1,0 +1,6 @@
+testdata/
+venv/
+activate.sh
+activate.ps1
+seagent_vue/node_modules/
+

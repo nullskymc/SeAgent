@@ -1,0 +1,17 @@
+fastapi
+langchain
+langchain_community
+langchain_core
+langchain_openai
+langchain_text_splitters
+openai
+passlib
+bcrypt
+peewee
+pydantic
+python_jose
+Requests
+starlette
+typing_extensions
+uvicorn
+chromadb
