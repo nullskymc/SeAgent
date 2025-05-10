@@ -1,5 +1,7 @@
-# SeAgent: 智能对话助手
+# SeAgent: 智能对话助手 
 
+ <img src="./seagent_vue/src/images/logo.svg" width = "300" height = "300" alt="图片名称"/>
+ 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.95.0+-green.svg)
 ![Vue](https://img.shields.io/badge/Vue-3.x-brightgreen.svg)
