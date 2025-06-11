@@ -1,9 +1,7 @@
 version: '3.8'
 services:
   seagent:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: registry.cn-hangzhou.aliyuncs.com/nullskymc/seagent:latest
     env_file:
       - .env
     ports:
