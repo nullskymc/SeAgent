@@ -2,7 +2,8 @@
   <div class="tools-container">
     <Header />
     
-    <div class="content-container">
+    <div class="content-wrapper">
+      <div class="content-container">
       <h1>工具箱</h1>
       
       <div class="tools-grid">
@@ -231,6 +232,7 @@
         </el-card>
       </div>
     </div>
+    </div>
   </div>
 </template>
 
@@ -248,21 +250,29 @@ import {
 
 <style scoped>
 .tools-container {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  /* 移除任何可能阻止滚动的属性 */
+  /* 根容器不滚动，避免嵌套滚动冲突 */
+  overflow: hidden;
+  position: relative;
+}
+
+.content-wrapper {
+  position: absolute;
+  top: 60px; /* 为固定头部留出空间 */
+  left: 0;
+  right: 0;
+  bottom: 0;
   overflow-y: auto;
 }
 
 .content-container {
-  padding: 80px 24px 24px;
+  padding: 20px 24px 24px;
   max-width: 1200px;
   margin: 0 auto;
-  flex: 1;
-  /* 确保内容可以滚动 */
   width: 100%;
-  overflow-y: visible;
+  /* 由外层 content-wrapper 负责滚动 */
 }
 
 h1 {

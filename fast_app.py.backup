@@ -3,7 +3,8 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from starlette.staticfiles import StaticFiles
+
 import uvicorn
 
 from database.db import db
@@ -37,18 +38,7 @@ app.include_router(api_router, prefix="/api")
 # 确保这个挂载点在所有其他路由之后
 dist_dir = os.path.join("seagent_vue", "dist")
 if os.path.exists(dist_dir):
-    # 处理SPA路由的函数
-    from fastapi.responses import FileResponse
-    from fastapi.requests import Request
-    
-    @app.get("/{full_path:path}")
-    async def serve_frontend(request: Request, full_path: str):
-        # 检查请求的文件是否实际存在
-        file_path = os.path.join(dist_dir, full_path)
-        if os.path.isfile(file_path):
-            return FileResponse(file_path)
-        # 对于所有其他路径，返回index.html以支持前端路由
-        return FileResponse(os.path.join(dist_dir, "index.html"))
+    app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")
 else:
     logging.warning("Frontend build directory not found. Please run 'npm run build' in the seagent_vue directory.")
 

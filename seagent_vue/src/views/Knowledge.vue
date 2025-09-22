@@ -2,88 +2,90 @@
   <div class="knowledge-container">
     <Header />
     
-    <div class="content-container">
-      <h1>知识库管理</h1>
-      
-      <!-- 上传文件表单 -->
-      <el-card class="upload-card">
-        <template #header>
-          <div class="card-header">
-            <h3>上传文件到知识库</h3>
-          </div>
-        </template>
+    <div class="content-wrapper">
+      <div class="content-container">
+        <h1>知识库管理</h1>
         
-        <el-form :model="uploadForm" label-width="100px">
-          <el-form-item label="知识库名称">
-            <el-input v-model="uploadForm.collectionName" placeholder="输入知识库名称" />
-          </el-form-item>
+        <!-- 上传文件表单 -->
+        <el-card class="upload-card">
+          <template #header>
+            <div class="card-header">
+              <h3>上传文件到知识库</h3>
+            </div>
+          </template>
           
-          <el-form-item label="选择文件">
-            <el-upload
-              class="file-uploader"
-              drag
-              :auto-upload="false"
-              :limit="1"
-              :on-change="handleFileChange"
-              :on-exceed="handleExceed"
-              :file-list="uploadForm.fileList"
-            >
-              <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-              <div class="el-upload__text">
-                拖拽文件到此处或 <em>点击上传</em>
-              </div>
-              <template #tip>
-                <div class="el-upload__tip">
-                  支持的文件类型: TXT, PDF, CSV
-                </div>
-              </template>
-            </el-upload>
-          </el-form-item>
-          
-          <el-form-item>
-            <el-button type="primary" @click="submitUpload" :loading="uploading">
-              上传到知识库
-            </el-button>
-          </el-form-item>
-        </el-form>
-      </el-card>
-      
-      <!-- 知识库列表 -->
-      <el-card class="collections-card">
-        <template #header>
-          <div class="card-header">
-            <h3>我的知识库</h3>
-            <el-button type="primary" @click="refreshCollections" :loading="loading" size="small">
-              刷新列表
-            </el-button>
-          </div>
-        </template>
-        
-        <div v-if="loading" class="loading-container">
-          <el-icon class="is-loading"><loading /></el-icon>
-          <span>加载知识库...</span>
-        </div>
-        
-        <div v-else-if="collections.length === 0" class="empty-container">
-          <el-empty description="暂无知识库" />
-        </div>
-        
-        <el-table v-else :data="collections" style="width: 100%">
-          <el-table-column prop="name" label="知识库名称" />
-          <el-table-column label="操作" width="120">
-            <template #default="scope">
-              <el-button
-                type="danger"
-                size="small"
-                @click="confirmDelete(scope.row)"
-                :loading="scope.row.deleting"
+          <el-form :model="uploadForm" label-width="100px">
+            <el-form-item label="知识库名称">
+              <el-input v-model="uploadForm.collectionName" placeholder="输入知识库名称" />
+            </el-form-item>
+            
+            <el-form-item label="选择文件">
+              <el-upload
+                class="file-uploader"
+                drag
+                :auto-upload="false"
+                :limit="1"
+                :on-change="handleFileChange"
+                :on-exceed="handleExceed"
+                :file-list="uploadForm.fileList"
               >
-                删除
+                <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+                <div class="el-upload__text">
+                  拖拽文件到此处或 <em>点击上传</em>
+                </div>
+                <template #tip>
+                  <div class="el-upload__tip">
+                    支持的文件类型: TXT, PDF, CSV
+                  </div>
+                </template>
+              </el-upload>
+            </el-form-item>
+            
+            <el-form-item>
+              <el-button type="primary" @click="submitUpload" :loading="uploading">
+                上传到知识库
               </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-card>
+            </el-form-item>
+          </el-form>
+        </el-card>
+        
+        <!-- 知识库列表 -->
+        <el-card class="collections-card">
+          <template #header>
+            <div class="card-header">
+              <h3>我的知识库</h3>
+              <el-button type="primary" @click="refreshCollections" :loading="loading" size="small">
+                刷新列表
+              </el-button>
+            </div>
+          </template>
+          
+          <div v-if="loading" class="loading-container">
+            <el-icon class="is-loading"><loading /></el-icon>
+            <span>加载知识库...</span>
+          </div>
+          
+          <div v-else-if="collections.length === 0" class="empty-container">
+            <el-empty description="暂无知识库" />
+          </div>
+          
+          <el-table v-else :data="collections" style="width: 100%">
+            <el-table-column prop="name" label="知识库名称" />
+            <el-table-column label="操作" width="120">
+              <template #default="scope">
+                <el-button
+                  type="danger"
+                  size="small"
+                  @click="confirmDelete(scope.row)"
+                  :loading="scope.row.deleting"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </div>
     </div>
     
     <!-- 确认删除对话框 -->
@@ -239,21 +241,29 @@ onMounted(() => {
 
 <style scoped>
 .knowledge-container {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  /* 确保整个容器可以滚动 */
+  /* 页面由内容区域承担滚动，根容器不滚动以避免嵌套滚动冲突 */
+  overflow: hidden;
+  position: relative;
+}
+
+.content-wrapper {
+  position: absolute;
+  top: 60px; /* 为固定头部留出空间 */
+  left: 0;
+  right: 0;
+  bottom: 0;
   overflow-y: auto;
 }
 
 .content-container {
-  padding: 80px 24px 24px;
+  padding: 20px 24px 24px;
   max-width: 1000px;
   margin: 0 auto;
-  flex: 1;
-  /* 确保内容可以滚动 */
   width: 100%;
-  overflow-y: visible;
+  /* 由 content-wrapper 负责滚动，这里不再设置滚动 */
 }
 
 h1 {

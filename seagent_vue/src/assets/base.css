@@ -83,4 +83,6 @@ body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* 确保body可以滚动 */
+  overflow-y: auto;
 }

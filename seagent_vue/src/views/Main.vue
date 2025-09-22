@@ -1,5 +1,5 @@
 <template>
-  <div id="app">
+  <div class="main-page">
     <Header @toggle-collapse="toggleDrawer" />
     <div class="main-container">
       <el-drawer
@@ -58,7 +58,7 @@ const handleTitleUpdate = () => {
 </script>
 
 <style>
-#app {
+.main-page {
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -95,9 +95,9 @@ const handleTitleUpdate = () => {
 }
 
 /* 暗黑模式适配 */
-:root.dark #app,
-html.dark #app,
-.el-html--dark #app {
+:root.dark .main-page,
+html.dark .main-page,
+.el-html--dark .main-page {
   background-color: var(--el-bg-color);
   color: var(--el-text-color-primary);
 }

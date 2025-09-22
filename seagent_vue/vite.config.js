@@ -18,6 +18,6 @@ export default defineConfig({
   build: {
     outDir: 'dist',  // 指定打包输出目录
   },
-  base: '/static/',  // 设置静态文件的基础路径
+  base: '/',  // 设置静态文件的基础路径
 })
 
