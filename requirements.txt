@@ -17,3 +17,5 @@ uvicorn
 chromadb
 python-multipart
 pypdf
+langgraph
+langchain-chroma
