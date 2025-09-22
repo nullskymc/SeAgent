@@ -19,3 +19,4 @@ python-multipart
 pypdf
 langgraph
 langchain-chroma
+langchain-mcp-adapters

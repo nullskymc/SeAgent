@@ -1,4 +1,4 @@
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_text_splitters import CharacterTextSplitter
 import os
 from dotenv import load_dotenv

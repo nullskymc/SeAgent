@@ -44,6 +44,12 @@
           </div>
           <div v-if="message.role === 'model'" class="text markdown-body" v-html="parseMarkdown(message.message)"></div>
           <div v-else class="text">{{ message.message }}</div>
+          <!-- 打字指示器 -->
+          <div v-if="message.isTyping" class="typing-indicator">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
           <div class="timestamp">{{ formatTime(message.timestamp) }}</div>
         </div>
       </div>
@@ -51,6 +57,7 @@
         <el-icon class="is-loading">
           <Loading />
         </el-icon>
+        <span>AI正在思考中...</span>
       </div>
     </el-scrollbar>
 
@@ -92,7 +99,7 @@ import dayjs from 'dayjs';
 import { marked } from 'marked';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
-import { sendMessage as apiSendMessage, getChatMessages, getChatDetail, deleteMessage } from '@/services/chatService';
+import { sendMessage as apiSendMessage, sendStreamMessage, getChatMessages, getChatDetail, deleteMessage } from '@/services/chatService';
 import { getUserInfo } from '@/services/auth';
 import KnowledgeSelector from '@/components/Knowledge/KnowledgeSelector.vue';
 import ChatInput from './ChatInput.vue';
@@ -246,40 +253,108 @@ const sendMessage = async () => {
   await nextTick();
   scrollToBottom();
 
-  // 发送消息到API，包含知识库选择
+  // 发送消息到API，包含知识库选择（使用流式API）
   sending.value = true;
   try {
-    const response = await apiSendMessage(
-      props.currentChatId,
-      userId.value,
-      userInput,
-      'user',
-      selectedCollection.value || null
-    );
+    // 添加一个空的AI回复消息用于流式更新
+    const aiMsgIndex = messages.value.length;
+    messages.value.push({
+      role: 'model',
+      message: '',
+      timestamp: new Date().toISOString(),
+      isTyping: true // 添加打字状态标记
+    });
 
-    // 添加AI回复
-    if (response) {
-      messages.value.push({
-        role: 'model',
-        message: response.message,
-        timestamp: response.timestamp
-      });
+    // 使用流式API发送消息
+    try {
+      const reader = await sendStreamMessage(
+        props.currentChatId,
+        userId.value,
+        userInput,
+        'user',
+        selectedCollection.value || null
+      );
 
-      // 再次滚动到底部
-      await nextTick();
-      scrollToBottom();
+      // 处理流式响应
+      const decoder = new TextDecoder();
+      let done = false;
 
-      // 如果是新对话的第一次问答，则生成标题
-      if (isNewChat && messages.value.length === 2) {
-        try {
-          const titleResponse = await generateChatTitle(props.currentChatId);
-          if (titleResponse && titleResponse.title) {
-            chatTitle.value = titleResponse.title;
-            emit('title-updated');
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+
+          // 解析SSE格式的数据
+          const lines = chunk.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+
+              if (data === '[DONE]') {
+                // 移除打字状态标记
+                messages.value[aiMsgIndex].isTyping = false;
+                done = true;
+                break;
+              }
+
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.content) {
+                  // 直接添加内容，但保持流式显示效果
+                  messages.value[aiMsgIndex].message += parsed.content;
+
+                  // 滚动到底部
+                  nextTick(() => {
+                    scrollToBottom();
+                  });
+                }
+              } catch (e) {
+                console.error('解析流式数据失败:', e);
+              }
+            }
           }
-        } catch (titleError) {
-          console.error('自动生成标题失败:', titleError);
         }
+      }
+    } catch (error) {
+      console.error('流式响应错误:', error);
+      // 移除打字状态标记
+      messages.value[aiMsgIndex].isTyping = false;
+
+      // 如果出现错误，回退到普通模式
+      try {
+        const response = await apiSendMessage(
+          props.currentChatId,
+          userId.value,
+          userInput,
+          'user',
+          selectedCollection.value || null
+        );
+
+        // 更新AI回复消息
+        if (response) {
+          messages.value[aiMsgIndex].message = response.message;
+        }
+      } catch (fallbackError) {
+        console.error('回退到普通模式也失败:', fallbackError);
+      }
+    }
+
+    // 再次滚动到底部
+    await nextTick();
+    scrollToBottom();
+
+    // 如果是新对话的第一次问答，则生成标题
+    if (isNewChat && messages.value.length === 2) {
+      try {
+        const titleResponse = await generateChatTitle(props.currentChatId);
+        if (titleResponse && titleResponse.title) {
+          chatTitle.value = titleResponse.title;
+          emit('title-updated');
+        }
+      } catch (titleError) {
+        console.error('自动生成标题失败:', titleError);
       }
     }
   } catch (error) {
@@ -427,6 +502,7 @@ watch(() => props.currentChatId, async (newChatId) => {
   max-width: 90%;
   margin-bottom: 24px;
   position: relative;
+  animation: fadeIn 0.3s ease-out;
 
   &.user {
     flex-direction: row-reverse;
@@ -436,6 +512,7 @@ watch(() => props.currentChatId, async (newChatId) => {
       align-items: flex-end;
       background: var(--el-color-primary);
       color: white;
+      border-bottom-right-radius: 2px;
     }
 
     .delete-btn {
@@ -448,6 +525,12 @@ watch(() => props.currentChatId, async (newChatId) => {
 
     &:hover .delete-btn {
       opacity: 1;
+    }
+  }
+
+  &.model {
+    .content {
+      border-bottom-left-radius: 2px;
     }
   }
 
@@ -589,6 +672,51 @@ watch(() => props.currentChatId, async (newChatId) => {
       font-size: 12px;
       color: var(--el-text-color-placeholder);
       margin-top: 8px;
+    }
+
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      height: 20px;
+      margin-top: 8px;
+    }
+
+    .typing-indicator span {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--el-color-primary);
+      margin-right: 4px;
+      animation: typing 1s infinite;
+    }
+
+    .typing-indicator span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-indicator span:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes typing {
+      0%, 60%, 100% {
+        transform: translateY(0);
+      }
+      30% {
+        transform: translateY(-5px);
+      }
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
   }
 }

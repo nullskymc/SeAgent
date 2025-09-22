@@ -1,11 +1,11 @@
 <template>
   <div class="tools-container">
     <Header />
-    
+
     <div class="content-wrapper">
       <div class="content-container">
       <h1>工具箱</h1>
-      
+
       <div class="tools-grid">
         <!-- 代码分析工具 -->
         <el-card class="tool-card">
@@ -15,7 +15,7 @@
               <el-tag type="primary" effect="plain">代码助手</el-tag>
             </div>
           </template>
-          
+
           <div class="tool-content">
             <p class="description">分析代码结构，包括函数、类、导入和变量等</p>
             <div class="feature-list">
@@ -34,7 +34,7 @@
             </div>
           </div>
         </el-card>
-        
+
         <!-- 代码生成工具 -->
         <el-card class="tool-card">
           <template #header>
@@ -43,7 +43,7 @@
               <el-tag type="success" effect="plain">代码助手</el-tag>
             </div>
           </template>
-          
+
           <div class="tool-content">
             <p class="description">根据描述生成代码片段，支持多种编程语言</p>
             <div class="feature-list">
@@ -62,7 +62,7 @@
             </div>
           </div>
         </el-card>
-        
+
         <!-- 代码修复工具 -->
         <el-card class="tool-card">
           <template #header>
@@ -71,7 +71,7 @@
               <el-tag type="warning" effect="plain">代码助手</el-tag>
             </div>
           </template>
-          
+
           <div class="tool-content">
             <p class="description">自动检测并修复代码中的错误和问题</p>
             <div class="feature-list">
@@ -90,7 +90,7 @@
             </div>
           </div>
         </el-card>
-        
+
         <!-- 代码文档工具 -->
         <el-card class="tool-card">
           <template #header>
@@ -99,7 +99,7 @@
               <el-tag type="info" effect="plain">代码助手</el-tag>
             </div>
           </template>
-          
+
           <div class="tool-content">
             <p class="description">为代码生成文档字符串和注释</p>
             <div class="feature-list">
@@ -118,7 +118,7 @@
             </div>
           </div>
         </el-card>
-        
+
         <!-- 依赖分析工具 -->
         <el-card class="tool-card">
           <template #header>
@@ -127,7 +127,7 @@
               <el-tag type="danger" effect="plain">代码助手</el-tag>
             </div>
           </template>
-          
+
           <div class="tool-content">
             <p class="description">分析代码依赖，识别导入的库并提供安装建议</p>
             <div class="feature-list">
@@ -146,7 +146,7 @@
             </div>
           </div>
         </el-card>
-        
+
         <!-- 代码质量检查 -->
         <el-card class="tool-card">
           <template #header>
@@ -155,7 +155,7 @@
               <el-tag type="primary" effect="plain">代码审查</el-tag>
             </div>
           </template>
-          
+
           <div class="tool-content">
             <p class="description">检查代码质量，提供改进建议</p>
             <div class="feature-list">
@@ -174,7 +174,7 @@
             </div>
           </div>
         </el-card>
-        
+
         <!-- 安全审查工具 -->
         <el-card class="tool-card">
           <template #header>
@@ -183,7 +183,7 @@
               <el-tag type="success" effect="plain">代码审查</el-tag>
             </div>
           </template>
-          
+
           <div class="tool-content">
             <p class="description">对代码进行安全性审查，检查常见的安全漏洞</p>
             <div class="feature-list">
@@ -202,7 +202,7 @@
             </div>
           </div>
         </el-card>
-        
+
         <!-- 最佳实践工具 -->
         <el-card class="tool-card">
           <template #header>
@@ -211,7 +211,7 @@
               <el-tag type="warning" effect="plain">代码审查</el-tag>
             </div>
           </template>
-          
+
           <div class="tool-content">
             <p class="description">根据编程语言的最佳实践，提供代码改进建议</p>
             <div class="feature-list">
@@ -230,6 +230,9 @@
             </div>
           </div>
         </el-card>
+
+        <!-- MCP工具配置 -->
+        <McpUploader />
       </div>
     </div>
     </div>
@@ -239,6 +242,7 @@
 <script setup>
 import { ref } from 'vue';
 import Header from '@/components/Chat/Header.vue';
+import McpUploader from '@/components/Tools/McpUploader.vue';
 import {
   DocumentCopy, Connection, Search, Promotion, Finished, Edit,
   CircleCheck, Refresh, Opportunity, Document, Notebook, Reading,

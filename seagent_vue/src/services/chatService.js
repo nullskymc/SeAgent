@@ -89,7 +89,7 @@ export const getUserChats = async (userId) => {
   }
 };
 
-// 发送消息到指定对话
+// 发送消息到指定对话（普通模式）
 export const sendMessage = async (chatId, userId, message, role = 'user', collection_name = null) => {
   try {
     let payload = {
@@ -97,24 +97,60 @@ export const sendMessage = async (chatId, userId, message, role = 'user', collec
       message,
       role
     };
-    
+
     // 如果userId存在且不是空，添加到请求中（确保作为字符串类型）
     if (userId !== undefined && userId !== null && userId !== '') {
       // 确保user_id是字符串类型
       payload.user_id = String(userId);
     }
-    
+
     // 如果指定了知识库集合名称，添加到请求中
     if (collection_name) {
       payload.collection_name = collection_name;
     }
-    
+
     const response = await api.post('/chat', payload);
     return response;
   } catch (error) {
     console.error('发送消息失败:', error);
     throw error;
   }
+};
+
+// 发送消息到指定对话（流式模式）
+export const sendStreamMessage = async (chatId, userId, message, role = 'user', collection_name = null) => {
+  // 构建请求载荷
+  let payload = {
+    chat_id: chatId,
+    message,
+    role
+  };
+
+  // 如果userId存在且不是空，添加到请求中（确保作为字符串类型）
+  if (userId !== undefined && userId !== null && userId !== '') {
+    // 确保user_id是字符串类型
+    payload.user_id = String(userId);
+  }
+
+  // 如果指定了知识库集合名称，添加到请求中
+  if (collection_name) {
+    payload.collection_name = collection_name;
+  }
+
+  // 获取认证token
+  const token = localStorage.getItem('seagent_token');
+
+  // 使用fetch API创建流式请求
+  const response = await fetch(`${api.defaults.baseURL}/chat/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    },
+    body: JSON.stringify(payload)
+  });
+
+  return response.body.getReader();
 };
 
 // 更新对话标题

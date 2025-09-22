@@ -95,7 +95,15 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     """获取当前登录用户"""
     from database.auth import SECRET_KEY, ALGORITHM
     from jose import jwt, JWTError
-    
+
+    # 检查token是否存在
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="未提供认证令牌",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="无法验证凭证",

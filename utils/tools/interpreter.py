@@ -7,7 +7,7 @@ from langchain.agents import initialize_agent
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_core.tools import tool
 from langchain.tools.retriever import create_retriever_tool
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 
 from adapter.openai_api import embeddings
 
