@@ -16,3 +16,4 @@ typing_extensions
 uvicorn
 chromadb
 python-multipart
+pypdf

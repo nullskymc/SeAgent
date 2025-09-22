@@ -3,6 +3,7 @@
     <div class="header-container">
       <!-- 左侧区域 -->
       <div class="left-section">
+        <el-button :icon="Menu" text circle @click="toggleCollapse" class="collapse-btn" />
         <img 
           src="@/images/logo.svg" 
           alt="Logo" 
@@ -64,7 +65,8 @@ import {
   Sunny,
   ChatLineRound,
   DataAnalysis,
-  Tools
+  Tools,
+  Menu
 } from '@element-plus/icons-vue'
 import { logout, getUserInfo } from '@/services/auth'
 

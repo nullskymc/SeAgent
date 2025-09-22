@@ -18,25 +18,27 @@ const currentYear = ref(new Date().getFullYear());
 
 <style scoped>
 .app-footer {
-  width: 100%;
-  padding: 12px 0;
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: auto;
+  padding: 8px 20px;
   text-align: center;
   background-color: var(--el-bg-color);
-  border-top: 1px solid var(--el-border-color-light);
-  margin-top: auto;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 1; /* 确保在内容之上 */
 }
 
 .footer-content {
-  max-width: 1200px;
-  margin: 0 auto;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 16px; /* 在元素之间添加一些间距 */
 }
 
 .copyright {
-  font-size: 14px;
+  font-size: 12px;
   color: var(--el-text-color-secondary);
   margin: 0;
 }
@@ -51,6 +53,7 @@ const currentYear = ref(new Date().getFullYear());
 :root.dark .app-footer,
 html.dark .app-footer,
 .el-html--dark .app-footer {
-  border-top-color: var(--el-border-color-darker);
+  background-color: #2c2c2f;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 </style>

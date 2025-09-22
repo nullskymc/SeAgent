@@ -181,3 +181,14 @@ export const deleteMessage = async (messageId) => {
     throw error;
   }
 };
+
+// 为对话生成标题
+export const generateChatTitle = async (chatId) => {
+  try {
+    const response = await api.post(`/api/chats/${chatId}/generate-title`);
+    return response;
+  } catch (error) {
+    console.error('生成标题失败:', error);
+    throw error;
+  }
+};

@@ -1,7 +1,7 @@
 <!-- ChatHistory.vue -->
 <template>
   <div class="history-sidebar-wrapper">
-    <el-aside class="history-sidebar" :style="{ transform: isCollapsed ? 'translateX(-100%)' : 'none' }">
+    <el-aside class="history-sidebar">
       <div class="history-header">
         <h3>对话历史</h3>
         <el-button type="primary" @click="handleCreateChat" plain round :loading="isCreating">
@@ -34,7 +34,7 @@
               <div class="title-row">
                 <span class="title">{{ chat.title }}</span>
               </div>
-              <div class="preview">{{ chat.last_message || '对话已开始' }}</div>
+              <div class="preview" :title="chat.last_message || '对话已开始'">{{ chat.last_message || '对话已开始' }}</div>
               <div class="time">{{ formatTime(chat.updated_at) }}</div>
             </div>
           </div>
@@ -73,16 +73,12 @@
 </template>
 
 <script setup>
-import { ref, defineProps, defineEmits, onMounted, watch } from 'vue'
+import { ref, defineEmits, onMounted, watch } from 'vue'
 import { Plus, ChatLineRound, Loading, MoreFilled, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import { getUserChatList, createNewChat, updateChatTitle, deleteChat } from '@/services/chatService'
 import { getUserInfo } from '@/services/auth'
-
-const props = defineProps({
-  isCollapsed: Boolean
-})
 
 const emit = defineEmits(['select-chat', 'chat-created'])
 
@@ -262,31 +258,25 @@ watch(() => userId.value, (newUserId) => {
   }
 })
 
-// 组件挂载时加载对话列表
+// 组件挂载时获取对话列表
 onMounted(() => {
   if (userId.value) {
     fetchChatList()
   }
 })
+
+// 暴露方法给父组件
+defineExpose({
+  fetchChatList,
+});
 </script>
 
 <style scoped>
 .history-sidebar {
-  width: 300px;
+  width: 100%;
   height: 100%;
-  position: relative;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-
-  &.collapsed {
-    transform: translateX(-100%);
-  }
-}
-
-@media (max-width: 768px) {
-  .history-sidebar-wrapper.collapsed {
-    transform: translateX(-100%);
-    width: 0;
-  }
+  display: flex;
+  flex-direction: column;
 }
 
 .history-header {
@@ -300,19 +290,13 @@ onMounted(() => {
 }
 
 .history-sidebar-wrapper {
-  position: relative;
-  width: 280px;
-  overflow: hidden;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.history-sidebar-wrapper.collapsed {
-  transform: translateX(-100%);
-  width: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .history-list {
-  height: calc(100vh - 160px);
+  flex: 1;
+  min-height: 0;
 }
 
 .loading-wrapper,

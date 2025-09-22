@@ -1,10 +1,14 @@
 <template>
   <div class="chat-container">
     <div class="chat-header">
-      <h2>{{ chatTitle }}</h2>
-
-      <!-- 知识库选择器 -->
-      <KnowledgeSelector @collection-change="handleCollectionChange" />
+      <div class="header-left">
+        <h2>{{ chatTitle }}</h2>
+      </div>
+      <div class="header-right">
+        <el-tooltip content="选择知识库" placement="top">
+          <el-button :icon="Reading" circle @click="isKnowledgeDrawerVisible = true"></el-button>
+        </el-tooltip>
+      </div>
     </div>
 
     <el-scrollbar class="message-container" ref="messageContainer">
@@ -13,9 +17,6 @@
         <el-alert type="info" :closable="false" show-icon>
           <template #title>
             <span>当前使用知识库: <strong>{{ selectedCollection }}</strong></span>
-          </template>
-          <template #default>
-            <p class="knowledge-tip">AI回答问题时将参考此知识库内容</p>
           </template>
         </el-alert>
       </div>
@@ -54,16 +55,21 @@
     </el-scrollbar>
 
     <div class="input-area">
-      <el-input v-model="inputMessage" type="textarea" :rows="3" placeholder="输入消息..." resize="none"
-        @keyup.enter.ctrl.exact="sendMessage" />
-      <div class="action-bar">
-        <div class="hint">按Ctrl+Enter发送</div>
-        <el-button type="primary" round @click="sendMessage" :loading="sending"
-          :disabled="!inputMessage.trim() || sending || !currentChatId">
-          发送
-        </el-button>
-      </div>
+      <ChatInput 
+        v-model="inputMessage" 
+        @send="sendMessage" 
+        :loading="sending"
+        :disabled="!currentChatId"
+      />
     </div>
+
+    <!-- 知识库选择抽屉 -->
+    <el-drawer v-model="isKnowledgeDrawerVisible" title="知识库" direction="rtl" size="300px">
+      <div class="knowledge-drawer-content">
+        <p>选择一个知识库，AI将参考其内容进行回答。</p>
+        <KnowledgeSelector @collection-change="handleCollectionChange" />
+      </div>
+    </el-drawer>
 
     <!-- 删除消息确认对话框 -->
     <el-dialog v-model="deleteMessageDialogVisible" title="确认删除" width="30%" :close-on-click-modal="false">
@@ -81,7 +87,7 @@
 <script setup>
 import { ref, computed, defineProps, watch, nextTick } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { UserFilled, Loading, Delete } from '@element-plus/icons-vue';
+import { UserFilled, Loading, Delete, Reading, Promotion } from '@element-plus/icons-vue';
 import dayjs from 'dayjs';
 import { marked } from 'marked';
 import katex from 'katex';
@@ -89,10 +95,13 @@ import 'katex/dist/katex.min.css';
 import { sendMessage as apiSendMessage, getChatMessages, getChatDetail, deleteMessage } from '@/services/chatService';
 import { getUserInfo } from '@/services/auth';
 import KnowledgeSelector from '@/components/Knowledge/KnowledgeSelector.vue';
+import ChatInput from './ChatInput.vue';
 
 const props = defineProps({
   currentChatId: Number
 });
+
+const emit = defineEmits(['title-updated']);
 
 // 消息列表和输入消息
 const messages = ref([]);
@@ -106,6 +115,7 @@ const chatDetail = ref(null);
 
 // 知识库选择
 const selectedCollection = ref('');
+const isKnowledgeDrawerVisible = ref(false);
 
 // 删除消息相关状态
 const deleteMessageDialogVisible = ref(false);
@@ -144,7 +154,7 @@ const parseMarkdown = (text) => {
       }
     });
     
-    // 处理块级公式 $$...$$
+    // 处理块级公式 $...$
     processedText = processedText.replace(/\$\$([^\$]+)\$\$/g, (match, formula) => {
       try {
         return `<div class="katex-block">${katex.renderToString(formula, {
@@ -171,6 +181,7 @@ const handleCollectionChange = (collection) => {
   if (collection) {
     ElMessage.success(`已选择知识库: ${collection}`);
   }
+  isKnowledgeDrawerVisible.value = false; // 关闭抽屉
 };
 
 // 获取对话消息
@@ -217,6 +228,8 @@ const sendMessage = async () => {
     return;
   }
 
+  const isNewChat = chatTitle.value === '新对话';
+
   // 用户消息
   const userMsg = {
     role: 'user',
@@ -255,6 +268,19 @@ const sendMessage = async () => {
       // 再次滚动到底部
       await nextTick();
       scrollToBottom();
+
+      // 如果是新对话的第一次问答，则生成标题
+      if (isNewChat && messages.value.length === 2) {
+        try {
+          const titleResponse = await generateChatTitle(props.currentChatId);
+          if (titleResponse && titleResponse.title) {
+            chatTitle.value = titleResponse.title;
+            emit('title-updated');
+          }
+        } catch (titleError) {
+          console.error('自动生成标题失败:', titleError);
+        }
+      }
     }
   } catch (error) {
     console.error('发送消息失败:', error);
@@ -336,14 +362,28 @@ watch(() => props.currentChatId, async (newChatId) => {
 .chat-header {
   padding: 16px 24px;
   border-bottom: 1px solid var(--el-border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 
   h2 {
-    margin: 0 0 16px 0;
+    margin: 0;
     font-size: 18px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+}
+
+.header-left,
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.knowledge-drawer-content {
+  padding: 0 20px;
 }
 
 .message-container {
@@ -384,7 +424,7 @@ watch(() => props.currentChatId, async (newChatId) => {
 
 .message-bubble {
   display: flex;
-  max-width: 80%;
+  max-width: 90%;
   margin-bottom: 24px;
   position: relative;
 
@@ -436,7 +476,7 @@ watch(() => props.currentChatId, async (newChatId) => {
     border-radius: 8px;
     background: var(--el-bg-color);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-    max-width: 800px;
+    max-width: 1200px;
     position: relative;
 
     .message-header {
@@ -553,27 +593,6 @@ watch(() => props.currentChatId, async (newChatId) => {
   }
 }
 
-.input-area {
-  flex-shrink: 0;
-  /* 禁止输入区域收缩 */
-  border-top: 1px solid var(--el-border-color);
-  padding: 16px;
-  background: var(--el-bg-color);
-  z-index: 1;
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
-}
-
-.action-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 12px;
-
-  .hint {
-    font-size: 12px;
-    color: var(--el-text-color-secondary);
-  }
-}
 
 /* 暗黑模式适配 */
 :root.dark .message-bubble .content,
@@ -606,5 +625,11 @@ html.dark .message-bubble .content,
 html.dark .message-bubble.user .content,
 .el-html--dark .message-bubble.user .content {
   background: var(--el-color-primary);
+}
+
+:root.dark .input-area :deep(.el-textarea__inner) {
+  background-color: #2c2c2f;
+  border-color: #4a4a4f;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 </style>

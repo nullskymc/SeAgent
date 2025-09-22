@@ -1,36 +1,60 @@
 <template>
   <div id="app">
-    <Header @toggle-collapse="handleCollapse" />
+    <Header @toggle-collapse="toggleDrawer" />
     <div class="main-container">
-      <ChatHistory :class="{ collapsed: isCollapsed }" @select-chat="handleSelectChat" />
-      <div class="chat-wrapper" :class="{ collapsed: isCollapsed }">
+      <el-drawer
+        v-model="isDrawerOpen"
+        title="对话历史"
+        direction="ltr"
+        :with-header="false"
+        size="240px"
+        custom-class="history-drawer"
+      >
+        <ChatHistory ref="chatHistoryRef" @select-chat="handleSelectChatInDrawer" />
+      </el-drawer>
+
+      <div class="chat-wrapper">
         <div class="chat-container">
-          <Chat :current-chat-id="currentChatId" class="chat-main" />
+          <Chat :current-chat-id="currentChatId" class="chat-main" @title-updated="handleTitleUpdate" />
         </div>
       </div>
     </div>
-    <!-- 添加页脚组件 -->
     <Footer />
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import Header from '@/components/Chat/Header.vue'
-import ChatHistory from '@/components/Chat/ChatHistory.vue'
-import Chat from '@/components/Chat/Chat.vue'
-import Footer from '@/components/Footer.vue'
+import { ref } from 'vue';
+import Header from '@/components/Chat/Header.vue';
+import ChatHistory from '@/components/Chat/ChatHistory.vue';
+import Chat from '@/components/Chat/Chat.vue';
+import Footer from '@/components/Footer.vue';
 
-const isCollapsed = ref(false)
-const currentChatId = ref(null)
+const isDrawerOpen = ref(true); // 默认打开
+const currentChatId = ref(null);
+const chatHistoryRef = ref(null);
 
-const handleCollapse = (collapsed) => {
-  isCollapsed.value = collapsed
-}
+const toggleDrawer = () => {
+  isDrawerOpen.value = !isDrawerOpen.value;
+};
 
 const handleSelectChat = (chatId) => {
-  currentChatId.value = chatId
-}
+  currentChatId.value = chatId;
+};
+
+// 在抽屉中选择对话后，如果是移动端则关闭抽屉
+const handleSelectChatInDrawer = (chatId) => {
+  currentChatId.value = chatId;
+  if (window.innerWidth < 768) {
+    isDrawerOpen.value = false;
+  }
+};
+
+const handleTitleUpdate = () => {
+  if (chatHistoryRef.value) {
+    chatHistoryRef.value.fetchChatList();
+  }
+};
 </script>
 
 <style>
@@ -39,6 +63,8 @@ const handleSelectChat = (chatId) => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background-color: var(--el-bg-color-page);
+  position: relative; /* 添加此行以作为页脚定位的上下文 */
 }
 
 .main-container {
@@ -48,63 +74,24 @@ const handleSelectChat = (chatId) => {
   height: calc(100vh - 60px);
   position: relative;
   overflow: hidden;
-}
-
-.chat-history-wrapper {
-  width: 240px;
-  flex-shrink: 0;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.chat-main {
-  overflow: visible;
-  flex: 1;
-  min-width: 0;
-  margin-right: 16px;
-  width: calc(100% - 16px);
-  transform: translateX(0);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  padding-bottom: 80px; /* 为悬浮页脚留出空间 */
+  box-sizing: border-box; /* 确保padding正确计算 */
 }
 
 .chat-wrapper {
   flex: 1;
-  position: relative;
-  transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-
-  &.collapsed {
-    margin-left: 0;
-  }
+  min-width: 0;
 }
 
 .chat-container {
-  max-width: 1400px;
-  margin: auto 0;
-  height: calc(100% - 20px);
+  width: 100%;
+  height: 100%;
   padding: 0;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.chat-wrapper.collapsed .chat-container {
-  margin-left: 0;
-  max-width: 1400px;
-}
-
-/* 侧边栏收起时的状态 - 更新选择器，移除不正确CSS */
-.main-container .chat-main {
-  width: calc(100% - 24px);
-  margin-left: 0;
-  transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-@media (max-width: 768px) {
-  .chat-history-wrapper.collapsed {
-    transform: translateX(-100%);
-  }
-
-  .chat-main {
-    margin-left: 0;
-    width: 100%;
-  }
+/* 自定义抽屉样式 */
+:deep(.history-drawer .el-drawer__body) {
+  padding: 0;
 }
 
 /* 暗黑模式适配 */
@@ -113,17 +100,5 @@ html.dark #app,
 .el-html--dark #app {
   background-color: var(--el-bg-color);
   color: var(--el-text-color-primary);
-}
-
-:root.dark .main-container,
-html.dark .main-container,
-.el-html--dark .main-container {
-  background-color: var(--el-bg-color);
-}
-
-:root.dark .chat-container,
-html.dark .chat-container,
-.el-html--dark .chat-container {
-  background-color: var(--el-bg-color);
 }
 </style>

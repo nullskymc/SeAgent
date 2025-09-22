@@ -106,3 +106,36 @@ async def api_chat_with_history(request: Request, current_user = Depends(get_cur
 async def api_chat_with_agent(request: Request, current_user = Depends(get_current_user)):
     """与代理对话（使用工具增强）"""
     return await api_chat(request, current_user)
+
+@router.post("/api/chats/{chat_id}/generate-title")
+async def generate_title(chat_id: int, current_user: dict = Depends(get_current_user)):
+    """为对话生成标题"""
+    chat = Chat.get_or_none((Chat.id == chat_id) & (Chat.user_id == current_user.id))
+    if not chat:
+        raise HTTPException(status_code=404, detail="聊天不存在")
+
+    # 查找第一条AI消息
+    first_ai_message = (
+        Message.select()
+        .where((Message.chat_id == chat_id) & (Message.role == "model"))
+        .order_by(Message.timestamp)
+        .first()
+    )
+
+    if not first_ai_message:
+        raise HTTPException(status_code=404, detail="未找到AI消息，无法生成标题")
+
+    # 使用LLM生成标题
+    prompt = f"请根据以下内容，为这段对话生成一个简洁的标题，不超过10个字。内容：'{first_ai_message.message}'"
+    try:
+        response = await model.ainvoke(prompt)
+        new_title = response.content.strip().strip('"“”')
+    except Exception as e:
+        logging.error(f"调用LLM生成标题失败: {e}")
+        raise HTTPException(status_code=500, detail="生成标题失败")
+
+    # 更新对话标题
+    chat.title = new_title
+    chat.save()
+
+    return {"title": new_title}

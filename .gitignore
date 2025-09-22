@@ -12,3 +12,4 @@ __pycache__/
 chatroom.db
 /vector_db/
 .DS_Store
+/seagent_vue/dist/
