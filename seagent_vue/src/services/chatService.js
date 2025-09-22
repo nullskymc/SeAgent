@@ -109,7 +109,7 @@ export const sendMessage = async (chatId, userId, message, role = 'user', collec
       payload.collection_name = collection_name;
     }
     
-    const response = await api.post('/api/chat', payload);
+    const response = await api.post('/chat', payload);
     return response;
   } catch (error) {
     console.error('发送消息失败:', error);
@@ -185,7 +185,7 @@ export const deleteMessage = async (messageId) => {
 // 为对话生成标题
 export const generateChatTitle = async (chatId) => {
   try {
-    const response = await api.post(`/api/chats/${chatId}/generate-title`);
+    const response = await api.post(`/chats/${chatId}/generate-title`);
     return response;
   } catch (error) {
     console.error('生成标题失败:', error);

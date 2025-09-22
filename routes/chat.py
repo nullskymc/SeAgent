@@ -107,7 +107,7 @@ async def api_chat_with_agent(request: Request, current_user = Depends(get_curre
     """与代理对话（使用工具增强）"""
     return await api_chat(request, current_user)
 
-@router.post("/api/chats/{chat_id}/generate-title")
+@router.post("/chats/{chat_id}/generate-title")
 async def generate_title(chat_id: int, current_user: dict = Depends(get_current_user)):
     """为对话生成标题"""
     chat = Chat.get_or_none((Chat.id == chat_id) & (Chat.user_id == current_user.id))
