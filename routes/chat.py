@@ -155,6 +155,9 @@ async def api_chat_stream(request: Request, current_user = Depends(get_current_u
         # 返回流式响应
         async def generate():
             try:
+                # 收集完整的AI响应
+                full_response = ""
+
                 # 流式调用多代理
                 async for chunk in stream_chat_with_multi_agent(
                     data.message,
@@ -163,8 +166,18 @@ async def api_chat_stream(request: Request, current_user = Depends(get_current_u
                     collection_name=data.collection_name,
                     mcp_config_path=mcp_config_path
                 ):
+                    # 累积响应内容
+                    full_response += chunk
                     # 发送每个chunk
                     yield f"data: {json.dumps({'content': chunk})}\n\n"
+
+                # 保存完整的AI响应到数据库
+                model_message = Message.create(
+                    chat_id=data.chat_id,
+                    user_id=data.user_id,
+                    message=full_response,
+                    role="model"
+                )
 
                 # 发送结束标记
                 yield "data: [DONE]\n\n"

@@ -2,6 +2,7 @@ from langchain_chroma import Chroma
 from langchain_text_splitters import CharacterTextSplitter
 import os
 from dotenv import load_dotenv
+import chromadb
 
 from adapter.openai_api import embeddings
 from utils.loader import text_loader
@@ -41,15 +42,13 @@ def create_vector_db(data_path, db_path=None, loader=text_loader, collection_nam
     docs = text_splitter.split_documents(documents)
     
     # 创建向量数据库
+    client = chromadb.PersistentClient(path=db_path)
     db = Chroma.from_documents(
         documents=docs, 
         embedding=embeddings,
-        persist_directory=db_path,
-        collection_name=collection_name
+        collection_name=collection_name,
+        client=client
     )
-    
-    # 持久化到磁盘
-    db.persist()
     
     return db
 
@@ -66,8 +65,9 @@ def merge_collections(base_db_path, new_data_path, loader=text_loader, collectio
         collection_name = COLLECTION_NAME
         
     # 加载现有数据库
+    client = chromadb.PersistentClient(path=base_db_path)
     db = Chroma(
-        persist_directory=base_db_path,
+        client=client,
         embedding_function=embeddings,
         collection_name=collection_name
     )
@@ -81,9 +81,6 @@ def merge_collections(base_db_path, new_data_path, loader=text_loader, collectio
     
     # 添加到现有集合
     db.add_documents(docs)
-    
-    # 持久化到磁盘
-    db.persist()
     
     return db
 

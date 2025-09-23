@@ -93,7 +93,14 @@ def get_agent_executor(user_id=None, collection_name=None):
     
     # 创建代理和执行器
     chat_agent = create_tool_calling_agent(model, tools, prompt)
-    agent_executor = AgentExecutor(agent=chat_agent, tools=tools)
+    agent_executor = AgentExecutor(
+        agent=chat_agent,
+        tools=tools,
+        verbose=True,
+        streaming=True,
+        handle_parsing_errors=True,
+        stream_runnable=True
+    )
     
     return agent_executor
 
@@ -108,7 +115,7 @@ async def chat_with_agent(msg, session_id, user_id=None, collection_name=None):
     """
     # 获取定制的agent executor
     agent_executor = get_agent_executor(user_id, collection_name)
-    
+
     # 添加聊天历史
     agent_with_chat_history = RunnableWithMessageHistory(
         agent_executor,
@@ -116,14 +123,64 @@ async def chat_with_agent(msg, session_id, user_id=None, collection_name=None):
         input_messages_key="question",
         history_messages_key="chat_history",
     )
-    
+
     # 调用代理
     res = agent_with_chat_history.invoke(
         {"question": msg},
         config={"configurable": {"session_id": session_id}},
     )
-    
+
     return res['output']
+
+async def stream_chat_with_agent(msg, session_id, user_id=None, collection_name=None):
+    """
+    使用代理与用户聊天（流式版本）
+    :param msg: 用户消息
+    :param session_id: 会话ID
+    :param user_id: 用户ID
+    :param collection_name: 知识库集合名称
+    :yield: 代理回复的流式数据
+    """
+    # 获取定制的agent executor
+    agent_executor = get_agent_executor(user_id, collection_name)
+
+    # 添加聊天历史
+    agent_with_chat_history = RunnableWithMessageHistory(
+        agent_executor,
+        get_session_history,
+        input_messages_key="question",
+        history_messages_key="chat_history",
+    )
+
+    # 使用LangChain的内置流式API
+    async for chunk in agent_with_chat_history.astream(
+        {"question": msg},
+        config={"configurable": {"session_id": session_id}},
+    ):
+        # 处理不同类型的流式输出
+        if isinstance(chunk, dict):
+            # 如果是字典，检查不同的字段
+            for key, value in chunk.items():
+                if key in ['output', 'content'] and value:
+                    yield value
+                elif key == 'agent_scratchpad':
+                    continue  # 忽略中间处理步骤
+                elif key == 'messages' and value:
+                    # 处理消息列表
+                    for msg in value:
+                        if hasattr(msg, 'content') and msg.content:
+                            yield msg.content
+        elif hasattr(chunk, 'content'):
+            # 如果是消息对象，提取content
+            if chunk.content:
+                yield chunk.content
+        elif hasattr(chunk, 'text'):
+            # 处理有text属性的对象
+            if chunk.text:
+                yield chunk.text
+        elif chunk is not None and str(chunk).strip():
+            # 其他情况直接yield chunk（如果不是None且不为空）
+            yield str(chunk)
 
 
 if __name__ == "__main__":

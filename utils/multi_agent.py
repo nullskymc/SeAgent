@@ -150,7 +150,14 @@ def get_multi_agent_executor(user_id=None, collection_name=None, mcp_config_path
 
     # 创建代理和执行器
     multi_agent = create_tool_calling_agent(model, tools, prompt)
-    agent_executor = AgentExecutor(agent=multi_agent, tools=tools, verbose=True, streaming=True)
+    agent_executor = AgentExecutor(
+        agent=multi_agent,
+        tools=tools,
+        verbose=True,
+        streaming=True,
+        handle_parsing_errors=True,
+        stream_runnable=True
+    )
 
     return agent_executor
 
@@ -194,13 +201,43 @@ async def stream_chat_with_multi_agent(msg, session_id, user_id=None, collection
     :param mcp_config_path: MCP配置文件路径
     :yield: 代理回复的流式数据
     """
-    # 简化版本，先返回非流式结果
-    result = await chat_with_multi_agent_original(msg, session_id, user_id, collection_name, mcp_config_path)
+    # 获取多代理执行器
+    agent_executor = get_multi_agent_executor(user_id, collection_name, mcp_config_path)
 
-    # 将结果分成小块，模拟流式输出
-    words = result.split()
-    for i, word in enumerate(words):
-        # 添加短暂延迟，使流式效果更真实
-        import asyncio
-        await asyncio.sleep(0.1)
-        yield word + (" " if i < len(words) - 1 else "")
+    # 添加聊天历史
+    agent_with_chat_history = RunnableWithMessageHistory(
+        agent_executor,
+        get_session_history,
+        input_messages_key="question",
+        history_messages_key="chat_history",
+    )
+
+    # 使用LangChain的内置流式API
+    async for chunk in agent_with_chat_history.astream(
+        {"question": msg},
+        config={"configurable": {"session_id": session_id}},
+    ):
+        # 处理不同类型的流式输出
+        if isinstance(chunk, dict):
+            # 如果是字典，检查不同的字段
+            for key, value in chunk.items():
+                if key in ['output', 'content'] and value:
+                    yield value
+                elif key == 'agent_scratchpad':
+                    continue  # 忽略中间处理步骤
+                elif key == 'messages' and value:
+                    # 处理消息列表
+                    for msg in value:
+                        if hasattr(msg, 'content') and msg.content:
+                            yield msg.content
+        elif hasattr(chunk, 'content'):
+            # 如果是消息对象，提取content
+            if chunk.content:
+                yield chunk.content
+        elif hasattr(chunk, 'text'):
+            # 处理有text属性的对象
+            if chunk.text:
+                yield chunk.text
+        elif chunk is not None and str(chunk).strip():
+            # 其他情况直接yield chunk（如果不是None且不为空）
+            yield str(chunk)

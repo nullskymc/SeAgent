@@ -16,7 +16,11 @@ os.environ["OPENAI_API_KEY"] = openai_api_key
 os.environ["OPENAI_API_BASE"] = openai_api_base
 
 # 初始化ChatOpenAI模型
-model = ChatOpenAI(model=os.getenv("OPENAI_MODEL_NAME", "glm-4"))
+model = ChatOpenAI(
+    model=os.getenv("OPENAI_MODEL_NAME", "glm-4"),
+    streaming=True,
+    temperature=0.7
+)
 
 # 初始化OpenAI嵌入模型
 embeddings = OpenAIEmbeddings(
