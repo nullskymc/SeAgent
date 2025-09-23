@@ -274,6 +274,7 @@ const sendMessage = async () => {
       const decoder = new TextDecoder();
       let done = false;
       let toolCalls = []; // 存储工具调用信息
+      let accumulatedModelResponse = ''; // 累积存储模型响应内容
 
       while (!done) {
         const { value, done: readerDone } = await reader.read();
@@ -653,6 +654,30 @@ const scrollToBottom = () => {
     const scrollbar = messageContainer.value;
     scrollbar.setScrollTop(scrollbar.wrapRef.scrollHeight);
   }
+};
+
+// 使用动画显示模型响应
+const displayModelResponseWithAnimation = async (messageIndex, content) => {
+  console.log('开始动画显示模型响应:', content);
+  
+  // 设置完整内容并标记为新消息以触发动画
+  messages.value[messageIndex].message = content;
+  messages.value[messageIndex].isNew = true;
+  
+  // 触发重新渲染
+  await nextTick();
+  
+  // 滚动到底部
+  scrollToBottom();
+  
+  // 动画完成后移除标记
+  setTimeout(() => {
+    if (messages.value[messageIndex]) {
+      messages.value[messageIndex].isNew = false;
+    }
+  }, 500);
+  
+  console.log('模型响应动画显示完成');
 };
 
 // 监听聊天ID变化，加载历史消息

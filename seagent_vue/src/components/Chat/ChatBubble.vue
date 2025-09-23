@@ -70,7 +70,14 @@
           <el-button type="primary" size="small" @click="saveEdit">保存</el-button>
         </div>
       </div>
-      <div v-else-if="message.role === 'model' && !isEditing" class="text markdown-body" v-html="parseMarkdown(message.message)"></div>
+      <!-- AI message content -->
+      <div 
+        v-else-if="message.role === 'model' && !isEditing" 
+        class="text markdown-body"
+        :class="{ 'model-response-enter-active': message.isNew }"
+        v-html="parseMarkdown(message.message)" 
+        :key="message.message"
+      ></div>
       <div v-else class="text">{{ message.message }}</div>
 
       <!-- Typing indicator -->
@@ -409,6 +416,22 @@ const showToolDrawer = () => {
   line-height: 1.6;
   white-space: pre-wrap;
   font-size: 15px;
+}
+
+/* 模型响应动画效果 */
+.model-response-enter-active {
+  animation: fadeInUp 0.5s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Markdown样式 */
