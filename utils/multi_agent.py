@@ -102,10 +102,10 @@ async def load_mcp_tools(mcp_config_path: str) -> List[Any]:
             tools = await client.get_tools()
             return tools
         else:
-            print(f"MCP配置文件不存在: {mcp_config_path}")
+            # MCP配置文件不存在
             return []
     except Exception as e:
-        print(f"加载MCP工具时出错: {e}")
+        logging.error(f"加载MCP工具时出错: {e}")
         return []
 
 def get_multi_agent_executor(user_id=None, collection_name=None, mcp_config_path=None):

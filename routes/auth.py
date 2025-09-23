@@ -48,13 +48,12 @@ def register(user_create: UserCreate):
 @router.post("/login", response_model=Dict[str, Any])
 def login(login_request: LoginRequest):
     """用户登录接口"""
-    # 打印调试信息，帮助诊断问题
-    print(f"Login attempt for user: {login_request.username}")
+    # 登录处理
     
     user = User.get_or_none(User.user_id == login_request.username)
     
     if not user:
-        print(f"User not found: {login_request.username}")
+        # 用户不存在
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码不正确",
@@ -62,7 +61,7 @@ def login(login_request: LoginRequest):
         )
     
     if not pwd_context.verify(login_request.password, user.user_password):
-        print(f"Password verification failed for user: {login_request.username}")
+        # 密码验证失败
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码不正确",

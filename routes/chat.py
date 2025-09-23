@@ -28,8 +28,8 @@ async def api_chat(request: Request, current_user = Depends(get_current_user)):
     try:
         # 获取原始请求数据
         body = await request.json()
-        logging.info(f"Request headers: {request.headers}")
-        logging.info(f"Request body: {body}")
+        # 记录请求信息但不包含敏感内容
+        logging.info(f"收到聊天请求: {body.get('chat_id', 'N/A')}")
 
         # 尝试解析请求数据
         try:
@@ -109,8 +109,8 @@ async def api_chat_stream(request: Request, current_user = Depends(get_current_u
     try:
         # 获取原始请求数据
         body = await request.json()
-        logging.info(f"Stream request headers: {request.headers}")
-        logging.info(f"Stream request body: {body}")
+        # 记录流式请求信息
+        logging.info(f"收到流式聊天请求: {body.get('chat_id', 'N/A')}")
 
         # 尝试解析请求数据
         try:

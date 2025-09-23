@@ -30,29 +30,16 @@
       <div v-else-if="messages.length === 0" class="empty-container">
         <el-empty description="暂无消息，发送一条消息开始对话吧" />
       </div>
-      <div v-else v-for="(message, index) in messages" :key="index" class="message-bubble" :class="message.role">
-        <div class="avatar">
-          <img v-if="message.role === 'model'" src="@/assets/logo.svg" alt="AI">
-          <el-icon v-else-if="message.role === 'user'">
-            <UserFilled />
-          </el-icon>
-        </div>
-        <div class="content">
-          <div class="message-header" v-if="message.role === 'user'">
-            <el-button class="delete-btn" type="danger" size="small" icon="Delete" circle
-              @click.stop="confirmDeleteMessage(message)"></el-button>
-          </div>
-          <div v-if="message.role === 'model'" class="text markdown-body" v-html="parseMarkdown(message.message)"></div>
-          <div v-else class="text">{{ message.message }}</div>
-          <!-- 打字指示器 -->
-          <div v-if="message.isTyping" class="typing-indicator">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-          <div class="timestamp">{{ formatTime(message.timestamp) }}</div>
-        </div>
-      </div>
+      <ChatBubble
+        v-for="(message, index) in messages"
+        :key="index"
+        :message="message"
+        :parse-markdown="parseMarkdown"
+        :format-time="formatTime"
+        @delete="confirmDeleteMessage"
+        @edit="handleEditMessage"
+        @retry="handleRetryMessage"
+      />
       <div v-if="sending" class="loading-indicator">
         <el-icon class="is-loading">
           <Loading />
@@ -94,15 +81,23 @@
 <script setup>
 import { ref, computed, defineProps, watch, nextTick } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { UserFilled, Loading, Delete, Reading, Promotion } from '@element-plus/icons-vue';
+import { UserFilled, Loading, Delete, Reading, Promotion, Edit, Refresh } from '@element-plus/icons-vue';
 import dayjs from 'dayjs';
 import { marked } from 'marked';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
-import { sendMessage as apiSendMessage, sendStreamMessage, getChatMessages, getChatDetail, deleteMessage } from '@/services/chatService';
+
+// Configure marked to minimize extra line breaks
+marked.setOptions({
+  breaks: false,
+  gfm: true,
+  headerIds: false
+});
+import { sendMessage as apiSendMessage, sendStreamMessage, getChatMessages, getChatDetail, deleteMessage, updateMessage } from '@/services/chatService';
 import { getUserInfo } from '@/services/auth';
 import KnowledgeSelector from '@/components/Knowledge/KnowledgeSelector.vue';
 import ChatInput from './ChatInput.vue';
+import ChatBubble from './ChatBubble.vue';
 
 const props = defineProps({
   currentChatId: Number
@@ -398,6 +393,184 @@ const handleDeleteMessage = async () => {
   }
 };
 
+// 编辑消息
+const handleEditMessage = async (message, newContent) => {
+  if (!message.id) {
+    ElMessage.warning('无法编辑此消息');
+    return;
+  }
+
+  try {
+    // 调用后端API更新消息
+    const response = await updateMessage(message.id, newContent);
+
+    // 更新前端状态
+    const messageIndex = messages.value.findIndex(msg => msg.id === message.id);
+    if (messageIndex !== -1) {
+      messages.value[messageIndex].message = newContent;
+      ElMessage.success('消息已更新');
+    }
+  } catch (error) {
+    console.error('编辑消息失败:', error);
+    ElMessage.error('编辑消息失败，请稍后重试');
+  }
+};
+
+// 统一重试消息处理（适用于用户和AI消息）
+const handleRetryMessage = async (message) => {
+  if (!props.currentChatId || !userId.value) {
+    ElMessage.warning('缺少必要信息');
+    return;
+  }
+
+  try {
+    // 找到要重试的消息在列表中的位置
+    const messageIndex = messages.value.findIndex(msg => msg.id === message.id);
+    if (messageIndex === -1) {
+      ElMessage.warning('未找到消息');
+      return;
+    }
+
+    // 删除该消息及其后面的所有消息
+    messages.value = messages.value.slice(0, messageIndex);
+
+    // 根据消息类型处理重试
+    if (message.role === 'user') {
+      // 如果是用户消息，重新发送该消息
+      await sendMessageWithRetry(message.message);
+    } else {
+      // 如果是AI消息，获取前一条用户消息并重新发送
+      if (messageIndex > 0) {
+        const userMessage = messages.value[messageIndex - 1];
+        if (userMessage.role === 'user') {
+          // 重新发送用户消息
+          await sendMessageWithRetry(userMessage.message);
+        } else {
+          ElMessage.warning('无法重试此消息');
+        }
+      } else {
+        ElMessage.warning('无法重试此消息');
+      }
+    }
+  } catch (error) {
+    console.error('重试消息失败:', error);
+    ElMessage.error('重试消息失败，请稍后重试');
+  }
+};
+
+// 重新发送消息的辅助函数
+const sendMessageWithRetry = async (userMessage) => {
+  // 用户消息
+  const userMsg = {
+    role: 'user',
+    message: userMessage,
+    timestamp: new Date().toISOString()
+  };
+  messages.value.push(userMsg);
+
+  // 滚动到底部
+  await nextTick();
+  scrollToBottom();
+
+  // 发送消息到API，包含知识库选择（使用流式API）
+  sending.value = true;
+  try {
+    // 添加一个空的AI回复消息用于流式更新
+    const aiMsgIndex = messages.value.length;
+    messages.value.push({
+      role: 'model',
+      message: '',
+      timestamp: new Date().toISOString(),
+      isTyping: true // 添加打字状态标记
+    });
+
+    // 使用流式API发送消息
+    try {
+      const reader = await sendStreamMessage(
+        props.currentChatId,
+        userId.value,
+        userMessage,
+        'user',
+        selectedCollection.value || null
+      );
+
+      // 处理流式响应
+      const decoder = new TextDecoder();
+      let done = false;
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+
+          // 解析SSE格式的数据
+          const lines = chunk.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+
+              if (data === '[DONE]') {
+                // 移除打字状态标记
+                messages.value[aiMsgIndex].isTyping = false;
+                done = true;
+                break;
+              }
+
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.content) {
+                  // 直接添加内容，但保持流式显示效果
+                  messages.value[aiMsgIndex].message += parsed.content;
+
+                  // 滚动到底部
+                  nextTick(() => {
+                    scrollToBottom();
+                  });
+                }
+              } catch (e) {
+                console.error('解析流式数据失败:', e);
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('流式响应错误:', error);
+      // 移除打字状态标记
+      messages.value[aiMsgIndex].isTyping = false;
+
+      // 如果出现错误，回退到普通模式
+      try {
+        const response = await apiSendMessage(
+          props.currentChatId,
+          userId.value,
+          userMessage,
+          'user',
+          selectedCollection.value || null
+        );
+
+        // 更新AI回复消息
+        if (response) {
+          messages.value[aiMsgIndex].message = response.message;
+        }
+      } catch (fallbackError) {
+        console.error('回退到普通模式也失败:', fallbackError);
+      }
+    }
+
+    // 再次滚动到底部
+    await nextTick();
+    scrollToBottom();
+  } catch (error) {
+    console.error('发送消息失败:', error);
+    ElMessage.error('发送消息失败，请稍后重试');
+  } finally {
+    sending.value = false;
+  }
+};
+
 // 滚动到底部
 const scrollToBottom = () => {
   if (messageContainer.value) {
@@ -469,10 +642,18 @@ watch(() => props.currentChatId, async (newChatId) => {
   overflow-y: auto;
   padding: 24px;
   transition: margin-left 0.3s ease;
+  background: var(--el-bg-color-page);
+}
+
+:root.dark .message-container,
+html.dark .message-container,
+.el-html--dark .message-container {
+  background: var(--el-bg-color);
 }
 
 .knowledge-info {
   margin-bottom: 20px;
+  animation: fadeIn 0.3s ease-out;
 }
 
 .knowledge-tip {
@@ -488,6 +669,7 @@ watch(() => props.currentChatId, async (newChatId) => {
   font-size: 16px;
   color: var(--el-color-primary);
   gap: 10px;
+  animation: fadeIn 0.3s ease-out;
 }
 
 .empty-container {
@@ -495,48 +677,82 @@ watch(() => props.currentChatId, async (newChatId) => {
   align-items: center;
   justify-content: center;
   height: 100%;
+  animation: fadeIn 0.5s ease-out;
 }
 
 .message-bubble {
   display: flex;
-  max-width: 90%;
-  margin-bottom: 24px;
+  max-width: 85%;
+  margin-bottom: 20px;
   position: relative;
+  opacity: 1;
   animation: fadeIn 0.3s ease-out;
 
   &.user {
     flex-direction: row-reverse;
     margin-left: auto;
 
+    .avatar {
+      align-self: flex-end;
+    }
+
     .content {
       align-items: flex-end;
       background: var(--el-color-primary);
       color: white;
-      border-bottom-right-radius: 2px;
+      border-bottom-right-radius: 4px;
+      border-top-right-radius: 16px;
+      border-top-left-radius: 16px;
+      border-bottom-left-radius: 16px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .content:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     }
 
     .delete-btn {
       position: absolute;
-      top: -10px;
-      right: -10px;
+      top: -12px;
+      right: -12px;
       opacity: 0;
-      transition: opacity 0.3s ease;
+      transition: all 0.2s ease;
+      transform: scale(0.9);
     }
 
     &:hover .delete-btn {
       opacity: 1;
+      transform: scale(1);
     }
   }
 
   &.model {
+    .avatar {
+      align-self: flex-end;
+    }
+
     .content {
-      border-bottom-left-radius: 2px;
+      border-bottom-left-radius: 4px;
+      border-top-left-radius: 16px;
+      border-top-right-radius: 16px;
+      border-bottom-right-radius: 16px;
+      background: var(--el-bg-color-overlay);
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+      border: 1px solid var(--el-border-color-light);
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .content:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+      border-color: var(--el-border-color-base);
     }
   }
 
   .avatar {
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     margin: 0 12px;
     flex-shrink: 0;
     display: flex;
@@ -545,22 +761,25 @@ watch(() => props.currentChatId, async (newChatId) => {
 
     img {
       width: 100%;
-      border-radius: 4px;
+      border-radius: 50%;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
     }
 
     .el-icon {
-      font-size: 28px;
+      font-size: 24px;
       color: var(--el-color-primary);
+      background: var(--el-color-primary-light-9);
+      border-radius: 50%;
+      padding: 6px;
     }
   }
 
   .content {
-    padding: 12px 16px;
-    border-radius: 8px;
-    background: var(--el-bg-color);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-    max-width: 1200px;
+    padding: 16px;
+    border-radius: 16px;
+    max-width: 100%;
     position: relative;
+    transition: all 0.2s ease;
 
     .message-header {
       position: relative;
@@ -570,6 +789,7 @@ watch(() => props.currentChatId, async (newChatId) => {
     .text {
       line-height: 1.6;
       white-space: pre-wrap;
+      font-size: 15px;
     }
 
     /* Markdown样式 */
@@ -669,9 +889,10 @@ watch(() => props.currentChatId, async (newChatId) => {
     }
 
     .timestamp {
-      font-size: 12px;
+      font-size: 11px;
       color: var(--el-text-color-placeholder);
       margin-top: 8px;
+      text-align: right;
     }
 
     .typing-indicator {
@@ -688,7 +909,7 @@ watch(() => props.currentChatId, async (newChatId) => {
       border-radius: 50%;
       background-color: var(--el-color-primary);
       margin-right: 4px;
-      animation: typing 1s infinite;
+      animation: typing 1.4s infinite ease-in-out;
     }
 
     .typing-indicator span:nth-child(2) {
@@ -708,7 +929,7 @@ watch(() => props.currentChatId, async (newChatId) => {
       }
     }
 
-    @keyframes fadeIn {
+    @keyframes slideIn {
       from {
         opacity: 0;
         transform: translateY(10px);
@@ -716,6 +937,15 @@ watch(() => props.currentChatId, async (newChatId) => {
       to {
         opacity: 1;
         transform: translateY(0);
+      }
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
       }
     }
   }
@@ -727,6 +957,7 @@ watch(() => props.currentChatId, async (newChatId) => {
 html.dark .message-bubble .content,
 .el-html--dark .message-bubble .content {
   background: var(--el-bg-color-overlay);
+  border-color: var(--el-border-color-base);
 
   /* 暗黑模式的Markdown样式调整 */
   .markdown-body {
@@ -755,9 +986,51 @@ html.dark .message-bubble.user .content,
   background: var(--el-color-primary);
 }
 
+:root.dark .message-bubble .avatar .el-icon,
+html.dark .message-bubble .avatar .el-icon,
+.el-html--dark .message-bubble .avatar .el-icon {
+  background: var(--el-color-primary-light-8);
+}
+
 :root.dark .input-area :deep(.el-textarea__inner) {
   background-color: #2c2c2f;
   border-color: #4a4a4f;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .message-bubble {
+    max-width: 95%;
+  }
+
+  .message-container {
+    padding: 16px;
+  }
+
+  .content {
+    padding: 12px 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .message-bubble {
+    max-width: 98%;
+  }
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+    margin: 0 8px;
+  }
+
+  .content {
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .timestamp {
+    font-size: 10px;
+  }
 }
 </style>

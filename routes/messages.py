@@ -74,6 +74,51 @@ async def get_user_messages(user_id: int, skip: int = 0, limit: int = 100):
     ]
 
 
+@router.put("/{message_id}")
+async def update_message(
+    message_id: int,
+    new_message: str = Body(..., description="新的消息内容"),
+    current_user = Depends(get_current_user)
+):
+    """
+    更新消息内容
+    """
+    message = Message.get_or_none(Message.id == message_id)
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="消息不存在"
+        )
+
+    # 确保用户只能编辑自己的消息（角色为user的消息）
+    if message.role == 'user' and message.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="没有权限编辑此消息"
+        )
+
+    # 更新消息内容
+    message.message = new_message
+
+    # 保存更新
+    message.save()
+
+    # 更新聊天会话的更新时间
+    chat = Chat.get_or_none(Chat.id == message.chat_id_id)
+    if chat:
+        chat.updated_at = datetime.now()
+        chat.save()
+
+    return {
+        "id": message.id,
+        "chat_id": message.chat_id_id,
+        "user_id": message.user_id,
+        "message": message.message,
+        "timestamp": message.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+        "role": message.role
+    }
+
+
 @router.delete("/{message_id}")
 async def delete_message(message_id: int, current_user = Depends(get_current_user)):
     """
@@ -85,26 +130,26 @@ async def delete_message(message_id: int, current_user = Depends(get_current_use
             status_code=status.HTTP_404_NOT_FOUND,
             detail="消息不存在"
         )
-    
+
     # 确保用户只能删除自己的消息（角色为user的消息）
     if message.role == 'user' and message.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="没有权限删除此消息"
         )
-    
+
     # 获取所属的聊天会话
     chat_id = message.chat_id_id
-    
+
     # 删除消息
     message.delete_instance()
-    
+
     # 更新聊天会话的更新时间
     chat = Chat.get_or_none(Chat.id == chat_id)
     if chat:
         chat.updated_at = datetime.now()
         chat.save()
-    
+
     return {"detail": "消息已删除"}
 
 
@@ -182,8 +227,6 @@ async def get_my_chats(user_id: Optional[int] = Depends(get_user_id)):
         }
         result.append(chat_data)
     
-    # 调试输出
-    print(f"返回的聊天列表数据: {result}")
     return result
 
 
@@ -194,8 +237,7 @@ async def get_user_chats_by_id(user_id: int):
         from database.models.message import get_user_chats
         from peewee import fn
         
-        # 调试信息
-        print(f"请求 /chats/{user_id} - 开始处理")
+        # 开始处理请求
         
         # 获取用户的所有聊天会话
         chats_query = get_user_chats(user_id)
@@ -215,8 +257,7 @@ async def get_user_chats_by_id(user_id: int):
                     (Message.role != "system")
                 ).order_by(Message.timestamp.desc()).first()
                 
-                # 打印调试信息
-                print(f"处理聊天ID: {chat.id}, 标题: {chat.title}, 消息数量: {message_count}")
+                # 处理聊天数据
                 
                 # 构造响应，只包含ChatResponse模型中定义的字段
                 chat_data = {
@@ -231,15 +272,14 @@ async def get_user_chats_by_id(user_id: int):
                 result.append(chat_data)
                 
             except Exception as e:
-                print(f"处理聊天ID: {chat.id} 时出错: {str(e)}")
-        
-        # 调试输出完整结果
-        print(f"返回的聊天列表数据: {result}")
+        # 记录错误日志但不打印详细信息
+        logging.error(f"处理聊天ID: {chat.id} 时出错: {str(e)}")
+
         return result
-        
+
     except Exception as e:
-        # 捕获并打印所有异常
-        print(f"处理 /chats/{user_id} 请求时出错: {str(e)}")
+        # 记录全局异常
+        logging.error(f"处理 /chats/{user_id} 请求时出错: {str(e)}")
         raise
 
 
@@ -434,9 +474,8 @@ async def get_simple_user_chats(user_id: int):
             }
             result.append(chat_data)
         
-        print(f"返回用户 {user_id} 的聊天列表: {result}")
         return result
     
     except Exception as e:
-        print(f"获取用户 {user_id} 聊天列表出错: {str(e)}")
+        logging.error(f"获取用户 {user_id} 聊天列表出错: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取聊天列表失败: {str(e)}")

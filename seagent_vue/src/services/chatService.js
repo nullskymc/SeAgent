@@ -166,6 +166,17 @@ export const updateChatTitle = async (chatId, newTitle) => {
   }
 };
 
+// 更新消息内容
+export const updateMessage = async (messageId, newContent) => {
+  try {
+    const response = await api.put(`/messages/${messageId}`, newContent);
+    return response;
+  } catch (error) {
+    console.error('更新消息失败:', error);
+    throw error;
+  }
+};
+
 // 删除对话
 export const deleteChat = async (chatId) => {
   try {
