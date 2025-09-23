@@ -4,6 +4,7 @@ import Main from '../views/Main.vue'
 import Knowledge from '../views/Knowledge.vue'
 import Index from '../views/Index.vue'
 import Tools from '../views/Tools.vue'  // 导入工具页面组件
+import McpTools from '../views/McpTools.vue'  // 导入MCP工具管理页面组件
 
 const routes = [
   {
@@ -31,6 +32,11 @@ const routes = [
     path: '/tools',   // 添加工具页面路由
     name: 'Tools',
     component: Tools
+  },
+  {
+    path: '/mcp-tools',   // 添加MCP工具管理页面路由
+    name: 'McpTools',
+    component: McpTools
   }
 ]
 

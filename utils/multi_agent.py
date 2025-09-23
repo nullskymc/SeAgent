@@ -1,6 +1,7 @@
 import asyncio
 import os
 import json
+import logging
 from typing import Dict, Any, Optional, List
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -10,6 +11,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from adapter.openai_api import model
 from database.memory_session import get_session_history
+from database.models.mcp import McpTool
 from utils.tools.interpreter import Interpreter, getTime
 from utils.tools.retriever import get_retriever_tool
 from utils.tools.code_assistant import (
@@ -24,6 +26,50 @@ from utils.tools.code_reviewer import (
     security_review,
     best_practices_advisor
 )
+
+def convert_mcp_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    转换MCP配置格式以适配langchain-mcp-adapters要求
+    处理两种格式：
+    1. 直接的服务器配置格式（正确格式）
+    2. 包含mcpServers包装的格式（需要转换）
+    """
+    # 如果配置已经是正确的格式（直接包含服务器配置），直接返回
+    if not config:
+        return {}
+    
+    # 检查是否是包含mcpServers包装的格式
+    if 'mcpServers' in config and isinstance(config['mcpServers'], dict):
+        # 转换格式：移除mcpServers包装并转换type为transport
+        converted = {}
+        for server_name, server_config in config['mcpServers'].items():
+            # 创建转换后的配置
+            converted_config = {}
+            for key, value in server_config.items():
+                # 将type转换为transport
+                if key == 'type':
+                    converted_config['transport'] = value
+                else:
+                    converted_config[key] = value
+            converted[server_name] = converted_config
+        return converted
+    
+    # 检查是否是直接的服务器配置但使用了type而不是transport
+    converted = {}
+    for key, value in config.items():
+        if isinstance(value, dict):
+            # 转换type为transport
+            converted_config = {}
+            for sub_key, sub_value in value.items():
+                if sub_key == 'type':
+                    converted_config['transport'] = sub_value
+                else:
+                    converted_config[sub_key] = sub_value
+            converted[key] = converted_config
+        else:
+            converted[key] = value
+    
+    return converted
 
 # 默认知识库工具 - 只作为备用
 default_retriever_tool = get_retriever_tool(path="./vector_db/know_db")
@@ -88,27 +134,48 @@ def get_expert_agent(expertise: str):
 
     return expert_executor
 
-async def load_mcp_tools(mcp_config_path: str) -> List[Any]:
-    """从JSON配置文件加载MCP工具"""
+async def load_mcp_tools(mcp_config_path: str = None, user_id: int = None) -> List[Any]:
+    """从JSON配置文件或数据库加载MCP工具"""
     try:
-        if os.path.exists(mcp_config_path):
-            with open(mcp_config_path, 'r', encoding='utf-8') as f:
-                mcp_configs = json.load(f)
+        mcp_configs = {}
 
+        # 如果提供了用户ID，优先从数据库加载
+        if user_id is not None:
+            # 查询用户激活的MCP工具
+            tools = McpTool.select().where(
+                (McpTool.user_id == user_id) &
+                (McpTool.is_active == 1)
+            )
+
+            # 合并所有工具配置，并转换格式
+            for tool in tools:
+                # 转换配置格式（如果需要）
+                converted_config = convert_mcp_config(tool.config)
+                mcp_configs.update(converted_config)
+
+        # 如果没有从数据库加载到配置且提供了文件路径，则从文件加载
+        if not mcp_configs and mcp_config_path and os.path.exists(mcp_config_path):
+            with open(mcp_config_path, 'r', encoding='utf-8') as f:
+                file_configs = json.load(f)
+                # 转换配置格式（如果需要）
+                converted_file_configs = convert_mcp_config(file_configs)
+                mcp_configs.update(converted_file_configs)
+
+        # 如果有配置则创建MCP客户端
+        if mcp_configs:
             # 创建MCP客户端
             client = MultiServerMCPClient(mcp_configs)
-
             # 获取工具
             tools = await client.get_tools()
             return tools
         else:
-            # MCP配置文件不存在
+            # 没有MCP配置
             return []
     except Exception as e:
         logging.error(f"加载MCP工具时出错: {e}")
         return []
 
-def get_multi_agent_executor(user_id=None, collection_name=None, mcp_config_path=None):
+async def get_multi_agent_executor(user_id=None, collection_name=None, mcp_config_path=None):
     """
     获取多代理执行器
     :param user_id: 用户ID
@@ -133,10 +200,16 @@ def get_multi_agent_executor(user_id=None, collection_name=None, mcp_config_path
     # 合并基础工具
     tools = base_tools + [retriever_tool]
 
-    # 加载MCP工具（如果提供了配置路径）
-    if mcp_config_path:
-        mcp_tools = asyncio.run(load_mcp_tools(mcp_config_path))
-        tools.extend(mcp_tools)
+    # 加载MCP工具（优先从数据库加载，如果没有则从文件加载）
+    mcp_tools = []
+    if user_id:
+        # 如果有用户ID，尝试从数据库加载MCP工具
+        mcp_tools = await load_mcp_tools(mcp_config_path, int(user_id))
+    elif mcp_config_path:
+        # 如果没有用户ID但有配置路径，从文件加载
+        mcp_tools = await load_mcp_tools(mcp_config_path)
+
+    tools.extend(mcp_tools)
 
     # 创建提示模板
     prompt = ChatPromptTemplate.from_messages(
@@ -172,7 +245,7 @@ async def chat_with_multi_agent_original(msg, session_id, user_id=None, collecti
     :return: 代理回复
     """
     # 获取多代理执行器
-    agent_executor = get_multi_agent_executor(user_id, collection_name, mcp_config_path)
+    agent_executor = await get_multi_agent_executor(user_id, collection_name, mcp_config_path)
 
     # 添加聊天历史
     agent_with_chat_history = RunnableWithMessageHistory(
@@ -199,10 +272,10 @@ async def stream_chat_with_multi_agent(msg, session_id, user_id=None, collection
     :param user_id: 用户ID
     :param collection_name: 知识库集合名称
     :param mcp_config_path: MCP配置文件路径
-    :yield: 代理回复的流式数据
+    :yield: 代理回复的流式数据，区分工具调用和模型响应
     """
     # 获取多代理执行器
-    agent_executor = get_multi_agent_executor(user_id, collection_name, mcp_config_path)
+    agent_executor = await get_multi_agent_executor(user_id, collection_name, mcp_config_path)
 
     # 添加聊天历史
     agent_with_chat_history = RunnableWithMessageHistory(
@@ -212,6 +285,9 @@ async def stream_chat_with_multi_agent(msg, session_id, user_id=None, collection
         history_messages_key="chat_history",
     )
 
+    # 存储工具调用信息
+    tool_calls = []
+    
     # 使用LangChain的内置流式API
     async for chunk in agent_with_chat_history.astream(
         {"question": msg},
@@ -219,25 +295,86 @@ async def stream_chat_with_multi_agent(msg, session_id, user_id=None, collection
     ):
         # 处理不同类型的流式输出
         if isinstance(chunk, dict):
-            # 如果是字典，检查不同的字段
-            for key, value in chunk.items():
-                if key in ['output', 'content'] and value:
-                    yield value
-                elif key == 'agent_scratchpad':
-                    continue  # 忽略中间处理步骤
-                elif key == 'messages' and value:
-                    # 处理消息列表
-                    for msg in value:
-                        if hasattr(msg, 'content') and msg.content:
-                            yield msg.content
+            # 处理工具调用事件
+            if "actions" in chunk:
+                # 工具调用开始
+                for action in chunk["actions"]:
+                    # 根据debug结果，action是一个AgentAction对象，具有tool和tool_input属性
+                    if hasattr(action, 'tool') and hasattr(action, 'tool_input'):
+                        tool_call_info = {
+                            "type": "tool_call",
+                            "name": action.tool,
+                            "input": action.tool_input,
+                            "log": getattr(action, 'log', '')
+                        }
+                        tool_calls.append(tool_call_info)
+                        yield f"[TOOL_CALL_START]{json.dumps(tool_call_info)}[TOOL_CALL_END]"
+            
+            elif "steps" in chunk:
+                # 工具调用完成
+                for step in chunk["steps"]:
+                    # 根据debug结果，step是一个元组 (action, observation)
+                    if isinstance(step, tuple) and len(step) >= 2:
+                        action, observation = step
+                        # action是一个AgentAction对象
+                        if hasattr(action, 'tool') and hasattr(action, 'tool_input'):
+                            tool_result_info = {
+                                "type": "tool_result",
+                                "name": action.tool,
+                                "input": action.tool_input,
+                                "output": str(observation)
+                            }
+                            yield f"[TOOL_RESULT_START]{json.dumps(tool_result_info)}[TOOL_RESULT_END]"
+            
+            elif "intermediate_step" in chunk:
+                # 中间步骤
+                for step in chunk["intermediate_step"]:
+                    # 根据debug结果，step是一个元组 (action, observation)
+                    if isinstance(step, tuple) and len(step) >= 2:
+                        action, observation = step
+                        # action是一个AgentAction对象
+                        if hasattr(action, 'tool') and hasattr(action, 'tool_input'):
+                            intermediate_info = {
+                                "type": "intermediate_step",
+                                "name": action.tool,
+                                "input": action.tool_input,
+                                "output": str(observation)
+                            }
+                            yield f"[INTERMEDIATE_START]{json.dumps(intermediate_info)}[INTERMEDIATE_END]"
+            
+            # 处理模型最终响应
+            elif "output" in chunk and chunk["output"]:
+                # 模型最终输出
+                yield f"[MODEL_RESPONSE]{chunk['output']}"
+            
+            # 处理其他字段
+            elif "content" in chunk and chunk["content"]:
+                yield f"[MODEL_RESPONSE]{chunk['content']}"
+            
+            elif "messages" in chunk and chunk["messages"]:
+                # 处理消息列表
+                for msg in chunk["messages"]:
+                    if hasattr(msg, 'content') and msg.content:
+                        yield f"[MODEL_RESPONSE]{msg.content}"
+        
         elif hasattr(chunk, 'content'):
             # 如果是消息对象，提取content
             if chunk.content:
-                yield chunk.content
+                yield f"[MODEL_RESPONSE]{chunk.content}"
+        
         elif hasattr(chunk, 'text'):
             # 处理有text属性的对象
             if chunk.text:
-                yield chunk.text
+                yield f"[MODEL_RESPONSE]{chunk.text}"
+        
         elif chunk is not None and str(chunk).strip():
             # 其他情况直接yield chunk（如果不是None且不为空）
-            yield str(chunk)
+            yield f"[MODEL_RESPONSE]{str(chunk)}"
+    
+    # 发送工具调用总结信息
+    if tool_calls:
+        summary_info = {
+            "type": "tool_summary",
+            "tool_calls": tool_calls
+        }
+        yield f"[TOOL_SUMMARY_START]{json.dumps(summary_info)}[TOOL_SUMMARY_END]"

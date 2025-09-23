@@ -21,6 +21,10 @@
             <el-icon><Tools /></el-icon>
             <span>工具箱</span>
           </el-menu-item>
+          <el-menu-item index="/mcp-tools">
+            <el-icon><Connection /></el-icon>
+            <span>MCP工具</span>
+          </el-menu-item>
           <el-menu-item index="/knowledge">
             <el-icon><DataAnalysis /></el-icon>
             <span>知识库管理</span>
@@ -66,6 +70,7 @@ import {
   ChatLineRound,
   DataAnalysis,
   Tools,
+  Connection,
   Menu
 } from '@element-plus/icons-vue'
 import { logout, getUserInfo } from '@/services/auth'

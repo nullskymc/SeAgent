@@ -35,9 +35,17 @@
         </div>
       </div>
 
-      <!-- AI message header with retry action only -->
+      <!-- AI message header with retry action and tool info -->
       <div class="message-header" v-else-if="message.role === 'model'">
         <div class="message-actions">
+          <el-button
+            v-if="hasToolCalls"
+            class="action-btn tool-btn"
+            size="small"
+            @click.stop="showToolDrawer"
+          >
+            <el-icon><Tools /></el-icon>
+          </el-button>
           <el-button
             class="action-btn retry-btn"
             size="small"
@@ -74,13 +82,21 @@
 
       <div class="timestamp">{{ formatTime(message.timestamp) }}</div>
     </div>
+    
+    <!-- Tool Drawer for AI messages -->
+    <ToolDrawer 
+      v-if="message.role === 'model'" 
+      v-model="isToolDrawerVisible" 
+      :tool-calls="toolCalls" 
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, defineProps, defineEmits } from 'vue';
-import { UserFilled, Edit, Delete, Refresh } from '@element-plus/icons-vue';
+import { ref, defineProps, defineEmits, computed } from 'vue';
+import { UserFilled, Edit, Delete, Refresh, Tools } from '@element-plus/icons-vue';
 import dayjs from 'dayjs';
+import ToolDrawer from '@/components/Tools/ToolDrawer.vue';
 
 const props = defineProps({
   message: {
@@ -103,6 +119,90 @@ const emit = defineEmits(['delete', 'edit', 'retry']);
 const isEditing = ref(false);
 const editedMessage = ref(props.message.message);
 const retrying = ref(false);
+
+// Tool drawer state
+const isToolDrawerVisible = ref(false);
+
+// Computed property to check if message has tool calls
+const hasToolCalls = computed(() => {
+  // 首先检查message对象中是否有tool_calls字段
+  if (props.message.tool_calls) {
+    // 如果tool_calls是数组，检查长度
+    if (Array.isArray(props.message.tool_calls)) {
+      return props.message.tool_calls.length > 0;
+    }
+    
+    // 如果tool_calls是字符串，检查是否为空或"[]"
+    if (typeof props.message.tool_calls === 'string') {
+      return props.message.tool_calls.trim() !== '' && props.message.tool_calls.trim() !== '[]';
+    }
+    
+    // 如果tool_calls是对象，检查是否为空对象
+    if (typeof props.message.tool_calls === 'object') {
+      return Object.keys(props.message.tool_calls).length > 0;
+    }
+    
+    // 其他情况，返回true（因为tool_calls字段存在）
+    return true;
+  }
+  
+  // 检查消息内容中是否包含工具调用信息
+  if (props.message.message) {
+    return props.message.message.includes('调用工具');
+  }
+  
+  // 如果没有tool_calls字段，返回false
+  return false;
+});
+
+// Extract tool calls from message metadata
+const toolCalls = computed(() => {
+  // 检查消息中是否有tool_calls字段
+  if (props.message.tool_calls) {
+    // 如果tool_calls是字符串，尝试解析为JSON
+    if (typeof props.message.tool_calls === 'string') {
+      try {
+        const parsed = JSON.parse(props.message.tool_calls);
+        // 如果解析结果是数组，直接返回
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+        // 如果解析结果是对象，将其包装在数组中返回
+        return [parsed];
+      } catch (e) {
+        console.error('解析tool_calls失败:', e);
+        // 如果解析失败，返回包含原始字符串的对象数组
+        return [{ name: '未知工具', input: '', output: props.message.tool_calls }];
+      }
+    }
+    // 如果tool_calls是数组，直接返回
+    if (Array.isArray(props.message.tool_calls)) {
+      return props.message.tool_calls;
+    }
+    // 如果tool_calls是对象，将其包装在数组中返回
+    if (typeof props.message.tool_calls === 'object') {
+      return [props.message.tool_calls];
+    }
+    // 其他情况，返回空数组
+    return [];
+  }
+  
+  // 检查消息内容中是否包含工具调用信息
+  if (props.message.message) {
+    // 尝试从消息内容中提取工具调用信息
+    const toolCallRegex = /调用工具\s*\[([^\]]+)\]/g;
+    const matches = props.message.message.match(toolCallRegex);
+    if (matches) {
+      return matches.map(match => {
+        const toolName = match.match(/调用工具\s*\[([^\]]+)\]/)[1];
+        return { name: toolName, input: '', output: '' };
+      });
+    }
+  }
+  
+  // 如果没有tool_calls字段，返回空数组
+  return [];
+});
 
 // Toggle edit mode
 const toggleEdit = () => {
@@ -137,6 +237,11 @@ const handleRetry = async () => {
   } finally {
     retrying.value = false;
   }
+};
+
+// Show tool drawer
+const showToolDrawer = () => {
+  isToolDrawerVisible.value = true;
 };
 </script>
 
@@ -275,6 +380,12 @@ const handleRetry = async () => {
   background: var(--el-color-primary-light-9);
   border-color: var(--el-color-primary-light-5);
   color: var(--el-color-primary);
+}
+
+.tool-btn {
+  background: var(--el-color-success-light-9);
+  border-color: var(--el-color-success-light-5);
+  color: var(--el-color-success);
 }
 
 .edit-content {

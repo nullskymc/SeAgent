@@ -26,6 +26,7 @@ class Message(PeeweeBaseModel):
     message = TextField()  # 消息字段
     timestamp = DateTimeField(constraints=[SQL('DEFAULT CURRENT_TIMESTAMP')], default=datetime.now)
     role = CharField()  # 消息角色（user/model/system）
+    tool_calls = JSONField(null=True)  # 工具调用信息，允许为空
 
 
 class Message_store(PeeweeBaseModel):

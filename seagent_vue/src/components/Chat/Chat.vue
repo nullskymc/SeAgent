@@ -81,7 +81,7 @@
 <script setup>
 import { ref, computed, defineProps, watch, nextTick } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { UserFilled, Loading, Delete, Reading, Promotion, Edit, Refresh } from '@element-plus/icons-vue';
+import { UserFilled, Loading, Delete, Reading, Promotion, Edit, Refresh, Tools } from '@element-plus/icons-vue';
 import dayjs from 'dayjs';
 import { marked } from 'marked';
 import katex from 'katex';
@@ -273,6 +273,7 @@ const sendMessage = async () => {
       // 处理流式响应
       const decoder = new TextDecoder();
       let done = false;
+      let toolCalls = []; // 存储工具调用信息
 
       while (!done) {
         const { value, done: readerDone } = await reader.read();
@@ -290,20 +291,57 @@ const sendMessage = async () => {
               if (data === '[DONE]') {
                 // 移除打字状态标记
                 messages.value[aiMsgIndex].isTyping = false;
+                // 保存工具调用信息到消息对象
+                if (toolCalls.length > 0) {
+                  messages.value[aiMsgIndex].tool_calls = toolCalls;
+                }
                 done = true;
                 break;
               }
 
               try {
-                const parsed = JSON.parse(data);
-                if (parsed.content) {
-                  // 直接添加内容，但保持流式显示效果
-                  messages.value[aiMsgIndex].message += parsed.content;
+                // 解析不同类型的数据
+                if (data.startsWith('[MODEL_RESPONSE]')) {
+                  // 模型响应内容
+                  const content = data.slice('[MODEL_RESPONSE]'.length);
+                  if (content) {
+                    // 直接添加内容，但保持流式显示效果
+                    messages.value[aiMsgIndex].message += content;
 
-                  // 滚动到底部
-                  nextTick(() => {
-                    scrollToBottom();
+                    // 滚动到底部
+                    nextTick(() => {
+                      scrollToBottom();
+                    });
+                  }
+                } else if (data.startsWith('[TOOL_CALL_START]') && data.endsWith('[TOOL_CALL_END]')) {
+                  // 工具调用开始
+                  const toolCallData = data.slice('[TOOL_CALL_START]'.length, -'[TOOL_CALL_END]'.length);
+                  const toolCall = JSON.parse(toolCallData);
+                  toolCalls.push({
+                    name: toolCall.name,
+                    input: toolCall.input,
+                    status: 'pending'
                   });
+                } else if (data.startsWith('[TOOL_RESULT_START]') && data.endsWith('[TOOL_RESULT_END]')) {
+                  // 工具调用结果
+                  const toolResultData = data.slice('[TOOL_RESULT_START]'.length, -'[TOOL_RESULT_END]'.length);
+                  const toolResult = JSON.parse(toolResultData);
+                  // 更新对应工具调用的状态
+                  const toolCall = toolCalls.find(tc => tc.name === toolResult.name && tc.input === toolResult.input);
+                  if (toolCall) {
+                    toolCall.output = toolResult.output;
+                    toolCall.status = 'success';
+                  }
+                } else if (data.startsWith('[INTERMEDIATE_START]') && data.endsWith('[INTERMEDIATE_END]')) {
+                  // 中间步骤
+                  const intermediateData = data.slice('[INTERMEDIATE_START]'.length, -'[INTERMEDIATE_END]'.length);
+                  const intermediate = JSON.parse(intermediateData);
+                  // 更新对应工具调用的状态
+                  const toolCall = toolCalls.find(tc => tc.name === intermediate.name && tc.input === intermediate.input);
+                  if (toolCall) {
+                    toolCall.output = intermediate.output;
+                    toolCall.status = 'success';
+                  }
                 }
               } catch (e) {
                 console.error('解析流式数据失败:', e);
@@ -497,6 +535,7 @@ const sendMessageWithRetry = async (userMessage) => {
       // 处理流式响应
       const decoder = new TextDecoder();
       let done = false;
+      let toolCalls = []; // 存储工具调用信息
 
       while (!done) {
         const { value, done: readerDone } = await reader.read();
@@ -514,20 +553,57 @@ const sendMessageWithRetry = async (userMessage) => {
               if (data === '[DONE]') {
                 // 移除打字状态标记
                 messages.value[aiMsgIndex].isTyping = false;
+                // 保存工具调用信息到消息对象
+                if (toolCalls.length > 0) {
+                  messages.value[aiMsgIndex].tool_calls = toolCalls;
+                }
                 done = true;
                 break;
               }
 
               try {
-                const parsed = JSON.parse(data);
-                if (parsed.content) {
-                  // 直接添加内容，但保持流式显示效果
-                  messages.value[aiMsgIndex].message += parsed.content;
+                // 解析不同类型的数据
+                if (data.startsWith('[MODEL_RESPONSE]')) {
+                  // 模型响应内容
+                  const content = data.slice('[MODEL_RESPONSE]'.length);
+                  if (content) {
+                    // 直接添加内容，但保持流式显示效果
+                    messages.value[aiMsgIndex].message += content;
 
-                  // 滚动到底部
-                  nextTick(() => {
-                    scrollToBottom();
+                    // 滚动到底部
+                    nextTick(() => {
+                      scrollToBottom();
+                    });
+                  }
+                } else if (data.startsWith('[TOOL_CALL_START]') && data.endsWith('[TOOL_CALL_END]')) {
+                  // 工具调用开始
+                  const toolCallData = data.slice('[TOOL_CALL_START]'.length, -'[TOOL_CALL_END]'.length);
+                  const toolCall = JSON.parse(toolCallData);
+                  toolCalls.push({
+                    name: toolCall.name,
+                    input: toolCall.input,
+                    status: 'pending'
                   });
+                } else if (data.startsWith('[TOOL_RESULT_START]') && data.endsWith('[TOOL_RESULT_END]')) {
+                  // 工具调用结果
+                  const toolResultData = data.slice('[TOOL_RESULT_START]'.length, -'[TOOL_RESULT_END]'.length);
+                  const toolResult = JSON.parse(toolResultData);
+                  // 更新对应工具调用的状态
+                  const toolCall = toolCalls.find(tc => tc.name === toolResult.name && tc.input === toolResult.input);
+                  if (toolCall) {
+                    toolCall.output = toolResult.output;
+                    toolCall.status = 'success';
+                  }
+                } else if (data.startsWith('[INTERMEDIATE_START]') && data.endsWith('[INTERMEDIATE_END]')) {
+                  // 中间步骤
+                  const intermediateData = data.slice('[INTERMEDIATE_START]'.length, -'[INTERMEDIATE_END]'.length);
+                  const intermediate = JSON.parse(intermediateData);
+                  // 更新对应工具调用的状态
+                  const toolCall = toolCalls.find(tc => tc.name === intermediate.name && tc.input === intermediate.input);
+                  if (toolCall) {
+                    toolCall.output = intermediate.output;
+                    toolCall.status = 'success';
+                  }
                 }
               } catch (e) {
                 console.error('解析流式数据失败:', e);

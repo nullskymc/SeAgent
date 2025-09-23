@@ -231,9 +231,7 @@
           </div>
         </el-card>
 
-        <!-- MCP工具配置 -->
-        <McpUploader />
-      </div>
+              </div>
     </div>
     </div>
   </div>
@@ -242,7 +240,6 @@
 <script setup>
 import { ref } from 'vue';
 import Header from '@/components/Chat/Header.vue';
-import McpUploader from '@/components/Tools/McpUploader.vue';
 import {
   DocumentCopy, Connection, Search, Promotion, Finished, Edit,
   CircleCheck, Refresh, Opportunity, Document, Notebook, Reading,

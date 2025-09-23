@@ -272,8 +272,8 @@ async def get_user_chats_by_id(user_id: int):
                 result.append(chat_data)
                 
             except Exception as e:
-        # 记录错误日志但不打印详细信息
-        logging.error(f"处理聊天ID: {chat.id} 时出错: {str(e)}")
+                # 记录错误日志但不打印详细信息
+                logging.error(f"处理聊天ID: {chat.id} 时出错: {str(e)}")
 
         return result
 

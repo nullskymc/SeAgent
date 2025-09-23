@@ -18,6 +18,7 @@ SeAgent是一个基于Python和Vue.js开发的智能对话系统，支持知识�
 - **用户系统**: 完整的用户注册、登录和认证功能
 - **对话管理**: 创建、查看、删除对话历史
 - **主题切换**: 支持亮色/暗色主题切换
+- **MCP工具管理**: 支持上传和管理MCP工具，扩展AI助手能力
 
 ### 技术特点
 - **前后端分离**: FastAPI后端 + Vue.js前端
@@ -149,6 +150,29 @@ SeAgent是一个基于Python和Vue.js开发的智能对话系统，支持知识�
 2. 发送的问题将基于选中的知识库进行回答
 3. 系统会在回答中引用相关知识
 
+### MCP工具管理
+1. 点击顶部导航栏的"MCP工具"
+2. 在MCP工具管理页面，您可以：
+   - **添加新工具**: 填写工具名称，在文本框中粘贴MCP JSON配置
+   - **查看已保存工具**: 在表格中查看所有已保存的MCP工具
+   - **删除工具**: 点击删除按钮移除不需要的MCP工具
+3. 提交成功后，MCP工具会自动在对话中生效，增强AI助手能力
+
+#### MCP工具配置示例
+```json
+{
+  "calculator": {
+    "transport": "stdio",
+    "command": "python",
+    "args": ["-c", "import sys; print('Calculator MCP server started'); sys.stdout.flush()"]
+  },
+  "web_search": {
+    "transport": "streamable_http",
+    "url": "http://localhost:8080/mcp"
+  }
+}
+```
+
 ## 项目结构
 
 ```
@@ -186,4 +210,31 @@ SeAgent/
 ## 许可证
 
 该项目采用MIT许可证 - 详细信息请参见 [LICENSE](LICENSE) 文件
+
+## MCP工具管理 API
+
+### 获取MCP工具列表
+```http
+GET /api/mcp/tools?user_id={user_id}
+Authorization: Bearer {token}
+```
+
+### 创建MCP工具
+```http
+POST /api/mcp/tools
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "user_id": 1,
+  "name": "calculator",
+  "config": "{\n  \"calculator\": {\n    \"transport\": \"stdio\",\n    \"command\": \"python\",\n    \"args\": [\"-c\", \"import sys; print('Calculator MCP server started'); sys.stdout.flush()\"]\n  }\n}"
+}
+```
+
+### 删除MCP工具
+```http
+DELETE /api/mcp/tools/{tool_id}
+Authorization: Bearer {token}
+```
 

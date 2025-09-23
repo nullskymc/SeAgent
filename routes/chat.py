@@ -157,6 +157,7 @@ async def api_chat_stream(request: Request, current_user = Depends(get_current_u
             try:
                 # 收集完整的AI响应
                 full_response = ""
+                tool_calls = []  # 存储工具调用信息
 
                 # 流式调用多代理
                 async for chunk in stream_chat_with_multi_agent(
@@ -166,17 +167,44 @@ async def api_chat_stream(request: Request, current_user = Depends(get_current_u
                     collection_name=data.collection_name,
                     mcp_config_path=mcp_config_path
                 ):
-                    # 累积响应内容
-                    full_response += chunk
-                    # 发送每个chunk
-                    yield f"data: {json.dumps({'content': chunk})}\n\n"
+                    # 处理不同类型的数据
+                    if chunk.startswith("[MODEL_RESPONSE]"):
+                        # 模型响应内容
+                        content = chunk[len("[MODEL_RESPONSE]"):]
+                        full_response += content
+                        # 发送模型响应内容
+                        yield f"data: [MODEL_RESPONSE]{content}\n\n"
+                    elif chunk.startswith("[TOOL_CALL_START]") and chunk.endswith("[TOOL_CALL_END]"):
+                        # 工具调用开始
+                        yield f"data: {chunk}\n\n"
+                        # 提取工具调用信息
+                        tool_call_data = chunk[len("[TOOL_CALL_START]"):-len("[TOOL_CALL_END]")]
+                        try:
+                            tool_call = json.loads(tool_call_data)
+                            tool_calls.append(tool_call)
+                        except:
+                            pass
+                    elif chunk.startswith("[TOOL_RESULT_START]") and chunk.endswith("[TOOL_RESULT_END]"):
+                        # 工具调用结果
+                        yield f"data: {chunk}\n\n"
+                    elif chunk.startswith("[INTERMEDIATE_START]") and chunk.endswith("[INTERMEDIATE_END]"):
+                        # 中间步骤
+                        yield f"data: {chunk}\n\n"
+                    elif chunk.startswith("[TOOL_SUMMARY_START]") and chunk.endswith("[TOOL_SUMMARY_END]"):
+                        # 工具调用总结
+                        yield f"data: {chunk}\n\n"
+                    else:
+                        # 其他内容作为模型响应处理
+                        full_response += chunk
+                        yield f"data: [MODEL_RESPONSE]{chunk}\n\n"
 
-                # 保存完整的AI响应到数据库
+                # 保存完整的AI响应到数据库，包含工具调用信息
                 model_message = Message.create(
                     chat_id=data.chat_id,
                     user_id=data.user_id,
                     message=full_response,
-                    role="model"
+                    role="model",
+                    tool_calls=tool_calls if tool_calls else None
                 )
 
                 # 发送结束标记
@@ -190,6 +218,7 @@ async def api_chat_stream(request: Request, current_user = Depends(get_current_u
     except Exception as e:
         logging.exception(f"处理流式聊天请求时出错: {e}")
         raise HTTPException(status_code=500, detail=f"处理请求失败: {str(e)}")
+
 
 @router.post("/mcp/upload")
 async def upload_mcp_config(file: UploadFile = File(...), user_id: str = None, current_user = Depends(get_current_user)):
