@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 from peewee import AutoField, IntegerField, TextField, DateTimeField, CharField, SQL, ForeignKeyField
 from playhouse.sqlite_ext import JSONField
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,8 +25,12 @@ class Message(PeeweeBaseModel):
     user_id = IntegerField(null=True)  # 用户ID字段，允许为空
     message = TextField()  # 消息字段
     timestamp = DateTimeField(constraints=[SQL('DEFAULT CURRENT_TIMESTAMP')], default=datetime.now)
-    role = CharField()  # 消息角色（user/model/system）
+    role = CharField()  # 消息角色（user/model/system/tool）
     tool_calls = JSONField(null=True)  # 工具调用信息，允许为空
+    tool_name = CharField(null=True)  # 工具名称（当role=tool时使用）
+    tool_input = JSONField(null=True)  # 工具输入（当role=tool时使用）
+    tool_output = TextField(null=True)  # 工具输出（当role=tool时使用）
+    tool_status = CharField(null=True)  # 工具状态（当role=tool时使用）
 
 
 class Message_store(PeeweeBaseModel):
@@ -77,6 +81,12 @@ class MessageResponse(BaseModel):
     message: str
     timestamp: str
     role: str
+    tool_calls: Optional[Any] = None  # 保持原有的工具调用字段
+    # 新增工具相关字段
+    tool_name: Optional[str] = None
+    tool_input: Optional[Any] = None
+    tool_output: Optional[str] = None
+    tool_status: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

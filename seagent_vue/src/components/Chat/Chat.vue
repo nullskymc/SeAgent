@@ -30,16 +30,23 @@
       <div v-else-if="messages.length === 0" class="empty-container">
         <el-empty description="暂无消息，发送一条消息开始对话吧" />
       </div>
-      <ChatBubble
-        v-for="(message, index) in messages"
-        :key="index"
-        :message="message"
-        :parse-markdown="parseMarkdown"
-        :format-time="formatTime"
-        @delete="confirmDeleteMessage"
-        @edit="handleEditMessage"
-        @retry="handleRetryMessage"
-      />
+      <template v-for="(message, index) in messages" :key="index">
+        <!-- 普通聊天消息 -->
+        <ChatBubble
+          v-if="message.role === 'user' || message.role === 'model'"
+          :message="message"
+          :parse-markdown="parseMarkdown"
+          :format-time="formatTime"
+          @delete="confirmDeleteMessage"
+          @edit="handleEditMessage"
+          @retry="handleRetryMessage"
+        />
+        <!-- 工具调用消息 -->
+        <ToolCallBubble
+          v-else-if="message.role === 'tool'"
+          :tool-call="message"
+        />
+      </template>
       <div v-if="sending" class="loading-indicator">
         <el-icon class="is-loading">
           <Loading />
@@ -93,11 +100,12 @@ marked.setOptions({
   gfm: true,
   headerIds: false
 });
-import { sendMessage as apiSendMessage, sendStreamMessage, getChatMessages, getChatDetail, deleteMessage, updateMessage } from '@/services/chatService';
+import { sendMessage as apiSendMessage, sendStreamMessage, getChatMessages, getChatDetail, deleteMessage, updateMessage, generateChatTitle } from '@/services/chatService';
 import { getUserInfo } from '@/services/auth';
 import KnowledgeSelector from '@/components/Knowledge/KnowledgeSelector.vue';
 import ChatInput from './ChatInput.vue';
 import ChatBubble from './ChatBubble.vue';
+import ToolCallBubble from './ToolCallBubble.vue';
 
 const props = defineProps({
   currentChatId: Number
@@ -201,7 +209,26 @@ const fetchChatMessages = async (chatId) => {
 
     // 获取消息列表，按时间升序排列
     const messagesResponse = await getChatMessages(chatId);
-    messages.value = messagesResponse;
+    
+    // 处理消息，确保工具消息正确转换
+    const processedMessages = messagesResponse.map(msg => {
+      if (msg.role === 'tool') {
+        // 确保工具消息有正确的字段
+        return {
+          ...msg,
+          name: msg.tool_name || msg.name,
+          input: msg.tool_input || msg.input,
+          output: msg.tool_output || msg.output,
+          status: msg.tool_status || msg.status,
+          isToolCall: true
+        };
+      }
+      return msg;
+    });
+    
+    messages.value = processedMessages;
+    
+    console.log('📋 加载的消息:', messages.value); // 调试日志
 
     // 如果没有消息，显示欢迎消息
     if (messages.value.length === 0) {
@@ -230,170 +257,283 @@ const sendMessage = async () => {
     return;
   }
 
+  const userInput = inputMessage.value.trim();
   const isNewChat = chatTitle.value === '新对话';
 
-  // 用户消息
-  const userMsg = {
+  // 1. Add user message to UI
+  messages.value.push({
     role: 'user',
-    message: inputMessage.value.trim(),
+    message: userInput,
     timestamp: new Date().toISOString()
-  };
-  messages.value.push(userMsg);
-
-  // 清空输入框
-  const userInput = inputMessage.value.trim();
+  });
   inputMessage.value = '';
-
-  // 滚动到底部
   await nextTick();
   scrollToBottom();
 
-  // 发送消息到API，包含知识库选择（使用流式API）
+  // 2. Execute the stream sending logic
+  await executeStream(userInput, isNewChat);
+};
+
+// Centralized stream execution logic
+const executeStream = async (messageContent, isNewChat = false) => {
   sending.value = true;
+
+  // 1. Add a blank AI message placeholder to the UI
+  const aiMessage = {
+    role: 'model',
+    message: '',
+    tool_calls: [],
+    timestamp: new Date().toISOString(),
+    isTyping: true,
+    id: `ai_${Date.now()}` // 添加唯一ID来跟踪AI消息
+  };
+  messages.value.push(aiMessage);
+  await nextTick();
+  scrollToBottom();
+
+  // 2. Call the refactored service with enhanced callbacks
   try {
-    // 添加一个空的AI回复消息用于流式更新
-    const aiMsgIndex = messages.value.length;
-    messages.value.push({
-      role: 'model',
-      message: '',
-      timestamp: new Date().toISOString(),
-      isTyping: true // 添加打字状态标记
-    });
-
-    // 使用流式API发送消息
-    try {
-      const reader = await sendStreamMessage(
-        props.currentChatId,
-        userId.value,
-        userInput,
-        'user',
-        selectedCollection.value || null
-      );
-
-      // 处理流式响应
-      const decoder = new TextDecoder();
-      let done = false;
-      let toolCalls = []; // 存储工具调用信息
-      let accumulatedModelResponse = ''; // 累积存储模型响应内容
-
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-
-        if (value) {
-          const chunk = decoder.decode(value, { stream: true });
-
-          // 解析SSE格式的数据
-          const lines = chunk.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-
-              if (data === '[DONE]') {
-                // 移除打字状态标记
-                messages.value[aiMsgIndex].isTyping = false;
-                // 保存工具调用信息到消息对象
-                if (toolCalls.length > 0) {
-                  messages.value[aiMsgIndex].tool_calls = toolCalls;
-                }
-                done = true;
-                break;
+    await sendStreamMessage(
+      {
+        chatId: props.currentChatId,
+        userId: userId.value,
+        message: messageContent,
+        role: 'user',
+        collection_name: selectedCollection.value || null,
+      },
+      {
+        onMessage: (content) => {
+          // 实时更新AI消息内容，通过ID查找确保准确性
+          const currentAiMessage = messages.value.find(msg => msg.id === aiMessage.id);
+          if (currentAiMessage) {
+            currentAiMessage.message += content;
+            // 保持isTyping状态为true，让ChatBubble组件自动处理打字机效果
+          }
+        },
+        onToolCall: async (dataString) => {
+          console.log('🔧 收到工具调用数据:', dataString); // 调试日志
+          
+          // 处理工具调用，将其作为独立的消息添加到聊天中
+          try {
+            if (dataString.startsWith('[TOOL_CALL_START]')) {
+              // 更安全的JSON数据提取
+              let jsonData = '';
+              if (dataString.endsWith('[TOOL_CALL_END]')) {
+                jsonData = dataString.slice('[TOOL_CALL_START]'.length, -'[TOOL_CALL_END]'.length);
+              } else {
+                // 如果没有结束标记，提取从开始标记到字符串结尾的内容
+                jsonData = dataString.slice('[TOOL_CALL_START]'.length);
               }
-
-              try {
-                // 解析不同类型的数据
-                if (data.startsWith('[MODEL_RESPONSE]')) {
-                  // 模型响应内容
-                  const content = data.slice('[MODEL_RESPONSE]'.length);
-                  if (content) {
-                    // 直接添加内容，但保持流式显示效果
-                    messages.value[aiMsgIndex].message += content;
-
-                    // 滚动到底部
-                    nextTick(() => {
-                      scrollToBottom();
+              
+              console.log('🔍 提取的JSON数据:', jsonData); // 调试日志
+              const toolData = JSON.parse(jsonData);
+              
+              // UTF解码函数
+              const decodeUTF = (str) => {
+                if (typeof str === 'string') {
+                  try {
+                    // 解码 \uXXXX 格式的Unicode字符
+                    return str.replace(/\\u[\dA-Fa-f]{4}/g, (match) => {
+                      return String.fromCharCode(parseInt(match.replace(/\\u/g, ''), 16));
                     });
+                  } catch (e) {
+                    return str;
                   }
-                } else if (data.startsWith('[TOOL_CALL_START]') && data.endsWith('[TOOL_CALL_END]')) {
-                  // 工具调用开始
-                  const toolCallData = data.slice('[TOOL_CALL_START]'.length, -'[TOOL_CALL_END]'.length);
-                  const toolCall = JSON.parse(toolCallData);
-                  toolCalls.push({
-                    name: toolCall.name,
-                    input: toolCall.input,
-                    status: 'pending'
-                  });
-                } else if (data.startsWith('[TOOL_RESULT_START]') && data.endsWith('[TOOL_RESULT_END]')) {
-                  // 工具调用结果
-                  const toolResultData = data.slice('[TOOL_RESULT_START]'.length, -'[TOOL_RESULT_END]'.length);
-                  const toolResult = JSON.parse(toolResultData);
-                  // 更新对应工具调用的状态
-                  const toolCall = toolCalls.find(tc => tc.name === toolResult.name && tc.input === toolResult.input);
-                  if (toolCall) {
-                    toolCall.output = toolResult.output;
-                    toolCall.status = 'success';
+                } else if (typeof str === 'object') {
+                  // 递归解码对象中的UTF字符
+                  const decoded = {};
+                  for (const [key, value] of Object.entries(str)) {
+                    decoded[decodeUTF(key)] = decodeUTF(value);
                   }
-                } else if (data.startsWith('[INTERMEDIATE_START]') && data.endsWith('[INTERMEDIATE_END]')) {
-                  // 中间步骤
-                  const intermediateData = data.slice('[INTERMEDIATE_START]'.length, -'[INTERMEDIATE_END]'.length);
-                  const intermediate = JSON.parse(intermediateData);
-                  // 更新对应工具调用的状态
-                  const toolCall = toolCalls.find(tc => tc.name === intermediate.name && tc.input === intermediate.input);
-                  if (toolCall) {
-                    toolCall.output = intermediate.output;
-                    toolCall.status = 'success';
+                  return decoded;
+                }
+                return str;
+              };
+              
+              // 解码工具调用数据
+              const decodedToolData = {
+                name: decodeUTF(toolData.name),
+                input: decodeUTF(toolData.input),
+                status: toolData.status || 'started'
+              };
+              
+              // 创建工具调用消息 - 确保添加到消息列表
+              const toolCallMessage = {
+                id: Date.now(), // 临时ID
+                role: 'tool',
+                name: decodedToolData.name,
+                input: decodedToolData.input,
+                output: '', // 初始为空，等待结果
+                status: decodedToolData.status,
+                timestamp: new Date().toISOString(),
+                isToolCall: true,
+                message: `工具调用: ${decodedToolData.name}`, // 用于显示的消息文本
+                // 工具调用特有的字段
+                tool_name: decodedToolData.name,
+                tool_input: decodedToolData.input,
+                tool_output: '',
+                tool_status: decodedToolData.status
+              };
+              
+              console.log('➕ 添加工具消息到界面:', toolCallMessage); // 调试日志
+              
+              // 添加到消息列表 - 添加到AI消息之后（正确的时序）
+              messages.value.push(toolCallMessage);
+              await nextTick();
+              scrollToBottom();
+              
+            } else if (dataString.startsWith('[TOOL_RESULT_START]')) {
+              // 更安全的JSON数据提取
+              let jsonData = '';
+              if (dataString.endsWith('[TOOL_RESULT_END]')) {
+                jsonData = dataString.slice('[TOOL_RESULT_START]'.length, -'[TOOL_RESULT_END]'.length);
+              } else {
+                // 如果没有结束标记，提取从开始标记到字符串结尾的内容
+                jsonData = dataString.slice('[TOOL_RESULT_START]'.length);
+              }
+              
+              console.log('🔍 提取的工具结果JSON数据:', jsonData); // 调试日志
+              const resultData = JSON.parse(jsonData);
+              
+              // UTF解码函数
+              const decodeUTF = (str) => {
+                if (typeof str === 'string') {
+                  try {
+                    return str.replace(/\\u[\dA-Fa-f]{4}/g, (match) => {
+                      return String.fromCharCode(parseInt(match.replace(/\\u/g, ''), 16));
+                    });
+                  } catch (e) {
+                    return str;
                   }
                 }
-              } catch (e) {
-                console.error('解析流式数据失败:', e);
+                return str;
+              };
+              
+              // 查找对应的工具调用消息并更新结果
+              const toolName = decodeUTF(resultData.name);
+              const toolMessage = messages.value.slice().reverse().find(msg => 
+                msg.role === 'tool' && 
+                msg.name === toolName &&
+                !msg.output // 找到还没有输出结果的工具消息
+              );
+              
+              if (toolMessage) {
+                const decodedOutput = decodeUTF(resultData.output);
+                toolMessage.output = decodedOutput;
+                toolMessage.tool_output = decodedOutput;
+                toolMessage.status = 'completed';
+                toolMessage.tool_status = 'completed';
+                // 更新消息文本以包含结果
+                toolMessage.message = `工具调用: ${toolMessage.name} - 已完成`;
+                
+                console.log('✅ 更新工具消息结果:', { toolName, output: decodedOutput.substring(0, 100) }); // 调试日志
+                
+                await nextTick();
+                scrollToBottom();
+              } else {
+                console.warn('⚠️ 未找到对应的工具消息:', toolName);
               }
+              
+            } else if (dataString.startsWith('[TOOL_SUMMARY_START]')) {
+              // 忽略工具总结，因为我们已经单独显示了每个工具调用
+              console.log('🙈 忽略工具总结:', dataString.substring(0, 100));
+              return;
+            }
+          } catch (e) {
+            console.error('❌ 解析工具调用数据失败:', e, dataString);
+          }
+          
+          // 同时保持原有的AI消息中的工具调用记录（用于工具抽屉显示）
+          const currentAiMessage = messages.value.find(msg => msg.id === aiMessage.id);
+          if (currentAiMessage) {
+            if (!currentAiMessage.tool_calls) {
+              currentAiMessage.tool_calls = [];
+            }
+            
+            try {
+              if (dataString.startsWith('[TOOL_CALL_START]')) {
+                let jsonData = '';
+                if (dataString.endsWith('[TOOL_CALL_END]')) {
+                  jsonData = dataString.slice('[TOOL_CALL_START]'.length, -'[TOOL_CALL_END]'.length);
+                } else {
+                  jsonData = dataString.slice('[TOOL_CALL_START]'.length);
+                }
+                const toolData = JSON.parse(jsonData);
+                currentAiMessage.tool_calls.push({
+                  name: toolData.name,
+                  input: toolData.input,
+                  status: 'pending'
+                });
+              } else if (dataString.startsWith('[TOOL_RESULT_START]')) {
+                let jsonData = '';
+                if (dataString.endsWith('[TOOL_RESULT_END]')) {
+                  jsonData = dataString.slice('[TOOL_RESULT_START]'.length, -'[TOOL_RESULT_END]'.length);
+                } else {
+                  jsonData = dataString.slice('[TOOL_RESULT_START]'.length);
+                }
+                const resultData = JSON.parse(jsonData);
+                const toolCall = currentAiMessage.tool_calls.find(tc => 
+                  tc.name === resultData.name && 
+                  JSON.stringify(tc.input) === JSON.stringify(resultData.input)
+                );
+                if (toolCall) {
+                  toolCall.output = resultData.output;
+                  toolCall.status = 'success';
+                }
+              }
+            } catch (e) {
+              console.error('更新AI消息工具调用记录失败:', e);
             }
           }
-        }
+        },
+        onTyping: (isTypingActive) => {
+          // 控制打字机效果状态
+          const currentAiMessage = messages.value.find(msg => msg.id === aiMessage.id);
+          if (currentAiMessage) {
+            currentAiMessage.isTyping = isTypingActive;
+          }
+        },
+        onDone: async (fullResponse) => {
+          const currentAiMessage = messages.value.find(msg => msg.id === aiMessage.id);
+          if (currentAiMessage) {
+            // 确保显示完整响应并停止打字机效果
+            currentAiMessage.isTyping = false;
+            currentAiMessage.message = fullResponse;
+            await nextTick();
+            scrollToBottom();
+          }
+          
+          // Generate title for the first message in a new chat
+          if (isNewChat && messages.value.length === 2) {
+            try {
+              const titleResponse = await generateChatTitle(props.currentChatId);
+              if (titleResponse && titleResponse.title) {
+                chatTitle.value = titleResponse.title;
+                emit('title-updated');
+              }
+            } catch (titleError) {
+              console.error('自动生成标题失败:', titleError);
+            }
+          }
+        },
+        onError: (error) => {
+          console.error('流式响应错误:', error);
+          const currentAiMessage = messages.value.find(msg => msg.id === aiMessage.id);
+          if (currentAiMessage) {
+            currentAiMessage.isTyping = false;
+            currentAiMessage.message = `抱歉，处理请求时出错: ${error.message}`;
+          }
+        },
       }
-    } catch (error) {
-      console.error('流式响应错误:', error);
-      // 移除打字状态标记
-      messages.value[aiMsgIndex].isTyping = false;
-
-      // 如果出现错误，回退到普通模式
-      try {
-        const response = await apiSendMessage(
-          props.currentChatId,
-          userId.value,
-          userInput,
-          'user',
-          selectedCollection.value || null
-        );
-
-        // 更新AI回复消息
-        if (response) {
-          messages.value[aiMsgIndex].message = response.message;
-        }
-      } catch (fallbackError) {
-        console.error('回退到普通模式也失败:', fallbackError);
-      }
-    }
-
-    // 再次滚动到底部
-    await nextTick();
-    scrollToBottom();
-
-    // 如果是新对话的第一次问答，则生成标题
-    if (isNewChat && messages.value.length === 2) {
-      try {
-        const titleResponse = await generateChatTitle(props.currentChatId);
-        if (titleResponse && titleResponse.title) {
-          chatTitle.value = titleResponse.title;
-          emit('title-updated');
-        }
-      } catch (titleError) {
-        console.error('自动生成标题失败:', titleError);
-      }
-    }
+    );
   } catch (error) {
     console.error('发送消息失败:', error);
     ElMessage.error('发送消息失败，请稍后重试');
+    // 发生灾难性故障时删除AI消息占位符
+    const aiMessageIndex = messages.value.findIndex(msg => msg.id === aiMessage.id);
+    if (aiMessageIndex !== -1) {
+      messages.value.splice(aiMessageIndex, 1);
+    }
   } finally {
     sending.value = false;
   }
@@ -418,10 +558,7 @@ const handleDeleteMessage = async () => {
   deleting.value = true;
   try {
     await deleteMessage(messageToDelete.value.id);
-
-    // 从消息列表中移除已删除的消息
     messages.value = messages.value.filter(msg => msg.id !== messageToDelete.value.id);
-
     ElMessage.success('消息已删除');
     deleteMessageDialogVisible.value = false;
   } catch (error) {
@@ -440,10 +577,7 @@ const handleEditMessage = async (message, newContent) => {
   }
 
   try {
-    // 调用后端API更新消息
-    const response = await updateMessage(message.id, newContent);
-
-    // 更新前端状态
+    await updateMessage(message.id, newContent);
     const messageIndex = messages.value.findIndex(msg => msg.id === message.id);
     if (messageIndex !== -1) {
       messages.value[messageIndex].message = newContent;
@@ -455,196 +589,48 @@ const handleEditMessage = async (message, newContent) => {
   }
 };
 
-// 统一重试消息处理（适用于用户和AI消息）
+// 统一重试消息处理
 const handleRetryMessage = async (message) => {
   if (!props.currentChatId || !userId.value) {
     ElMessage.warning('缺少必要信息');
     return;
   }
 
-  try {
-    // 找到要重试的消息在列表中的位置
-    const messageIndex = messages.value.findIndex(msg => msg.id === message.id);
-    if (messageIndex === -1) {
-      ElMessage.warning('未找到消息');
-      return;
-    }
-
-    // 删除该消息及其后面的所有消息
-    messages.value = messages.value.slice(0, messageIndex);
-
-    // 根据消息类型处理重试
-    if (message.role === 'user') {
-      // 如果是用户消息，重新发送该消息
-      await sendMessageWithRetry(message.message);
-    } else {
-      // 如果是AI消息，获取前一条用户消息并重新发送
-      if (messageIndex > 0) {
-        const userMessage = messages.value[messageIndex - 1];
-        if (userMessage.role === 'user') {
-          // 重新发送用户消息
-          await sendMessageWithRetry(userMessage.message);
-        } else {
-          ElMessage.warning('无法重试此消息');
-        }
-      } else {
-        ElMessage.warning('无法重试此消息');
-      }
-    }
-  } catch (error) {
-    console.error('重试消息失败:', error);
-    ElMessage.error('重试消息失败，请稍后重试');
+  const messageIndex = messages.value.findIndex(msg => msg.id === message.id);
+  if (messageIndex === -1) {
+    ElMessage.warning('未找到要重试的消息');
+    return;
   }
-};
 
-// 重新发送消息的辅助函数
-const sendMessageWithRetry = async (userMessage) => {
-  // 用户消息
-  const userMsg = {
-    role: 'user',
-    message: userMessage,
-    timestamp: new Date().toISOString()
-  };
-  messages.value.push(userMsg);
-
-  // 滚动到底部
-  await nextTick();
-  scrollToBottom();
-
-  // 发送消息到API，包含知识库选择（使用流式API）
-  sending.value = true;
-  try {
-    // 添加一个空的AI回复消息用于流式更新
-    const aiMsgIndex = messages.value.length;
-    messages.value.push({
-      role: 'model',
-      message: '',
-      timestamp: new Date().toISOString(),
-      isTyping: true // 添加打字状态标记
-    });
-
-    // 使用流式API发送消息
-    try {
-      const reader = await sendStreamMessage(
-        props.currentChatId,
-        userId.value,
-        userMessage,
-        'user',
-        selectedCollection.value || null
-      );
-
-      // 处理流式响应
-      const decoder = new TextDecoder();
-      let done = false;
-      let toolCalls = []; // 存储工具调用信息
-
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-
-        if (value) {
-          const chunk = decoder.decode(value, { stream: true });
-
-          // 解析SSE格式的数据
-          const lines = chunk.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-
-              if (data === '[DONE]') {
-                // 移除打字状态标记
-                messages.value[aiMsgIndex].isTyping = false;
-                // 保存工具调用信息到消息对象
-                if (toolCalls.length > 0) {
-                  messages.value[aiMsgIndex].tool_calls = toolCalls;
-                }
-                done = true;
-                break;
-              }
-
-              try {
-                // 解析不同类型的数据
-                if (data.startsWith('[MODEL_RESPONSE]')) {
-                  // 模型响应内容
-                  const content = data.slice('[MODEL_RESPONSE]'.length);
-                  if (content) {
-                    // 直接添加内容，但保持流式显示效果
-                    messages.value[aiMsgIndex].message += content;
-
-                    // 滚动到底部
-                    nextTick(() => {
-                      scrollToBottom();
-                    });
-                  }
-                } else if (data.startsWith('[TOOL_CALL_START]') && data.endsWith('[TOOL_CALL_END]')) {
-                  // 工具调用开始
-                  const toolCallData = data.slice('[TOOL_CALL_START]'.length, -'[TOOL_CALL_END]'.length);
-                  const toolCall = JSON.parse(toolCallData);
-                  toolCalls.push({
-                    name: toolCall.name,
-                    input: toolCall.input,
-                    status: 'pending'
-                  });
-                } else if (data.startsWith('[TOOL_RESULT_START]') && data.endsWith('[TOOL_RESULT_END]')) {
-                  // 工具调用结果
-                  const toolResultData = data.slice('[TOOL_RESULT_START]'.length, -'[TOOL_RESULT_END]'.length);
-                  const toolResult = JSON.parse(toolResultData);
-                  // 更新对应工具调用的状态
-                  const toolCall = toolCalls.find(tc => tc.name === toolResult.name && tc.input === toolResult.input);
-                  if (toolCall) {
-                    toolCall.output = toolResult.output;
-                    toolCall.status = 'success';
-                  }
-                } else if (data.startsWith('[INTERMEDIATE_START]') && data.endsWith('[INTERMEDIATE_END]')) {
-                  // 中间步骤
-                  const intermediateData = data.slice('[INTERMEDIATE_START]'.length, -'[INTERMEDIATE_END]'.length);
-                  const intermediate = JSON.parse(intermediateData);
-                  // 更新对应工具调用的状态
-                  const toolCall = toolCalls.find(tc => tc.name === intermediate.name && tc.input === intermediate.input);
-                  if (toolCall) {
-                    toolCall.output = intermediate.output;
-                    toolCall.status = 'success';
-                  }
-                }
-              } catch (e) {
-                console.error('解析流式数据失败:', e);
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('流式响应错误:', error);
-      // 移除打字状态标记
-      messages.value[aiMsgIndex].isTyping = false;
-
-      // 如果出现错误，回退到普通模式
-      try {
-        const response = await apiSendMessage(
-          props.currentChatId,
-          userId.value,
-          userMessage,
-          'user',
-          selectedCollection.value || null
-        );
-
-        // 更新AI回复消息
-        if (response) {
-          messages.value[aiMsgIndex].message = response.message;
-        }
-      } catch (fallbackError) {
-        console.error('回退到普通模式也失败:', fallbackError);
-      }
+  // Find the user message that prompted this response
+  let userMessageToRetry = null;
+  if (message.role === 'user') {
+    userMessageToRetry = message;
+    // Remove the user message and all subsequent messages
+    messages.value.splice(messageIndex);
+  } else if (message.role === 'model' && messageIndex > 0) {
+    const prevMessage = messages.value[messageIndex - 1];
+    if (prevMessage.role === 'user') {
+      userMessageToRetry = prevMessage;
+      // Remove the AI message and all subsequent messages
+      messages.value.splice(messageIndex);
     }
+  }
 
-    // 再次滚动到底部
+  if (userMessageToRetry) {
+    // Re-add the user message to the list to show it's being processed
+    messages.value.push({
+      role: 'user',
+      message: userMessageToRetry.message,
+      timestamp: new Date().toISOString()
+    });
     await nextTick();
     scrollToBottom();
-  } catch (error) {
-    console.error('发送消息失败:', error);
-    ElMessage.error('发送消息失败，请稍后重试');
-  } finally {
-    sending.value = false;
+    
+    // Execute the stream again
+    await executeStream(userMessageToRetry.message);
+  } else {
+    ElMessage.warning('无法找到有效的用户消息进行重试');
   }
 };
 

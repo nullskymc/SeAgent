@@ -158,6 +158,7 @@ async def api_chat_stream(request: Request, current_user = Depends(get_current_u
                 # 收集完整的AI响应
                 full_response = ""
                 tool_calls = []  # 存储工具调用信息
+                current_tool_messages = {}  # 存储当前工具消息的ID映射
 
                 # 流式调用多代理
                 async for chunk in stream_chat_with_multi_agent(
@@ -174,24 +175,76 @@ async def api_chat_stream(request: Request, current_user = Depends(get_current_u
                         full_response += content
                         # 发送模型响应内容
                         yield f"data: [MODEL_RESPONSE]{content}\n\n"
+                        
                     elif chunk.startswith("[TOOL_CALL_START]") and chunk.endswith("[TOOL_CALL_END]"):
                         # 工具调用开始
                         yield f"data: {chunk}\n\n"
-                        # 提取工具调用信息
+                        # 提取工具调用信息并保存到数据库
                         tool_call_data = chunk[len("[TOOL_CALL_START]"):-len("[TOOL_CALL_END]")]
                         try:
                             tool_call = json.loads(tool_call_data)
+                            
+                            # 创建工具消息记录
+                            tool_message = Message.create(
+                                chat_id=data.chat_id,
+                                user_id=data.user_id,
+                                message=f"工具调用: {tool_call.get('name', '未知工具')}",
+                                role="tool",
+                                tool_name=tool_call.get('name'),
+                                tool_input=tool_call.get('input'),
+                                tool_output="",  # 初始为空
+                                tool_status=tool_call.get('status', 'started')
+                            )
+                            
+                            # 使用工具名称和输入作为key来映射消息ID
+                            tool_key = f"{tool_call.get('name')}_{json.dumps(tool_call.get('input', {}), sort_keys=True)}"
+                            current_tool_messages[tool_key] = tool_message.id
+                            
                             tool_calls.append(tool_call)
-                        except:
-                            pass
+                            logging.info(f"💾 保存工具调用消息到数据库: {tool_message.id}")
+                            
+                        except Exception as e:
+                            logging.error(f"保存工具调用消息失败: {e}")
+                            
                     elif chunk.startswith("[TOOL_RESULT_START]") and chunk.endswith("[TOOL_RESULT_END]"):
                         # 工具调用结果
                         yield f"data: {chunk}\n\n"
+                        # 更新工具消息的结果
+                        tool_result_data = chunk[len("[TOOL_RESULT_START]"):-len("[TOOL_RESULT_END]")]
+                        try:
+                            tool_result = json.loads(tool_result_data)
+                            
+                            # 查找对应的工具消息并更新结果
+                            # 更简化的匹配逻辑：找到最新的同名工具且状态为started的消息
+                            tool_name = tool_result.get('name')
+                            
+                            if tool_name:
+                                # 查找最近的同名工具消息且状态为started
+                                tool_message = Message.select().where(
+                                    (Message.role == 'tool') &
+                                    (Message.tool_name == tool_name) &
+                                    (Message.tool_status == 'started')
+                                ).order_by(Message.timestamp.desc()).first()
+                                
+                                if tool_message:
+                                    # 更新工具消息
+                                    tool_message.tool_output = str(tool_result.get('output', ''))
+                                    tool_message.tool_status = 'completed'
+                                    tool_message.message = f"工具调用: {tool_name} - 已完成"
+                                    tool_message.save()
+                                    
+                                    output_preview = str(tool_result.get('output', ''))[:50]
+                                    logging.info(f"✅ 更新工具消息结果: {tool_message.id} -> {output_preview}...")
+                                else:
+                                    logging.warning(f"⚠️ 未找到待更新的工具消息: {tool_name}")
+                            
+                        except Exception as e:
+                            logging.error(f"❌ 更新工具结果失败: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            
                     elif chunk.startswith("[INTERMEDIATE_START]") and chunk.endswith("[INTERMEDIATE_END]"):
                         # 中间步骤
-                        yield f"data: {chunk}\n\n"
-                    elif chunk.startswith("[TOOL_SUMMARY_START]") and chunk.endswith("[TOOL_SUMMARY_END]"):
-                        # 工具调用总结
                         yield f"data: {chunk}\n\n"
                     else:
                         # 其他内容作为模型响应处理
@@ -209,6 +262,8 @@ async def api_chat_stream(request: Request, current_user = Depends(get_current_u
 
                 # 发送结束标记
                 yield "data: [DONE]\n\n"
+                logging.info(f"💾 保存AI响应消息到数据库: {model_message.id}")
+                
             except Exception as e:
                 logging.exception(f"流式处理聊天请求时出错: {e}")
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"

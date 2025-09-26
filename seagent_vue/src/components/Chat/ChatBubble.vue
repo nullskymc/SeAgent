@@ -70,18 +70,18 @@
           <el-button type="primary" size="small" @click="saveEdit">保存</el-button>
         </div>
       </div>
-      <!-- AI message content -->
+      <!-- AI message content with typewriter effect -->
       <div 
         v-else-if="message.role === 'model' && !isEditing" 
         class="text markdown-body"
         :class="{ 'model-response-enter-active': message.isNew }"
-        v-html="parseMarkdown(message.message)" 
-        :key="message.message"
+        v-html="displayedContent" 
+        :key="`${message.id}-${displayedContent}`"
       ></div>
       <div v-else class="text">{{ message.message }}</div>
 
       <!-- Typing indicator -->
-      <div v-if="message.isTyping" class="typing-indicator">
+      <div v-if="message.isTyping || isTypewriting" class="typing-indicator">
         <span></span>
         <span></span>
         <span></span>
@@ -100,7 +100,7 @@
 </template>
 
 <script setup>
-import { ref, defineProps, defineEmits, computed } from 'vue';
+import { ref, defineProps, defineEmits, computed, watch, onMounted, onUnmounted } from 'vue';
 import { UserFilled, Edit, Delete, Refresh, Tools } from '@element-plus/icons-vue';
 import dayjs from 'dayjs';
 import ToolDrawer from '@/components/Tools/ToolDrawer.vue';
@@ -129,6 +129,13 @@ const retrying = ref(false);
 
 // Tool drawer state
 const isToolDrawerVisible = ref(false);
+
+// Typewriter effect state
+const displayedContent = ref('');
+const isTypewriting = ref(false);
+const typewriterTimer = ref(null);
+let currentIndex = 0;
+let fullParsedContent = '';
 
 // Computed property to check if message has tool calls
 const hasToolCalls = computed(() => {
@@ -211,6 +218,90 @@ const toolCalls = computed(() => {
   return [];
 });
 
+// 打字机效果函数
+const startTypewriter = (content) => {
+  // 重置状态
+  displayedContent.value = '';
+  currentIndex = 0;
+  fullParsedContent = props.parseMarkdown(content);
+  isTypewriting.value = true;
+  
+  // 清除之前的定时器
+  if (typewriterTimer.value) {
+    clearInterval(typewriterTimer.value);
+  }
+  
+  // 创建打字机效果 - 调整速度使其更明显
+  const typeSpeed = 80; // 增加到80毫秒，让打字机效果更明显
+  
+  typewriterTimer.value = setInterval(() => {
+    if (currentIndex < fullParsedContent.length) {
+      // 逐字符添加内容
+      displayedContent.value = fullParsedContent.substring(0, currentIndex + 1);
+      currentIndex++;
+    } else {
+      // 打字完成
+      clearInterval(typewriterTimer.value);
+      typewriterTimer.value = null;
+      isTypewriting.value = false;
+    }
+  }, typeSpeed);
+};
+
+// 停止打字机效果
+const stopTypewriter = () => {
+  if (typewriterTimer.value) {
+    clearInterval(typewriterTimer.value);
+    typewriterTimer.value = null;
+  }
+  isTypewriting.value = false;
+  
+  // 立即显示完整内容
+  if (props.message.message) {
+    displayedContent.value = props.parseMarkdown(props.message.message);
+  }
+};
+
+// 监听消息内容变化
+watch(() => props.message.message, (newMessage, oldMessage) => {
+  // 如果是模型消息且内容发生变化
+  if (props.message.role === 'model' && newMessage !== oldMessage) {
+    if (props.message.isTyping) {
+      // 如果消息正在输入中，启动打字机效果
+      startTypewriter(newMessage);
+    } else {
+      // 如果消息输入完成，直接显示完整内容
+      displayedContent.value = props.parseMarkdown(newMessage);
+    }
+  }
+}, { immediate: true });
+
+// 监听消息的isTyping状态变化
+watch(() => props.message.isTyping, (isTyping) => {
+  if (!isTyping && isTypewriting.value) {
+    // 如果消息输入完成但还在打字，停止打字机效果
+    stopTypewriter();
+  }
+});
+
+// 组件挂载时初始化内容
+onMounted(() => {
+  if (props.message.role === 'model') {
+    if (props.message.isTyping) {
+      startTypewriter(props.message.message || '');
+    } else {
+      displayedContent.value = props.parseMarkdown(props.message.message || '');
+    }
+  }
+});
+
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  if (typewriterTimer.value) {
+    clearInterval(typewriterTimer.value);
+  }
+});
+
 // Toggle edit mode
 const toggleEdit = () => {
   isEditing.value = !isEditing.value;
@@ -250,6 +341,11 @@ const handleRetry = async () => {
 const showToolDrawer = () => {
   isToolDrawerVisible.value = true;
 };
+
+// 暴露停止打字机效果的方法，供父组件调用
+defineExpose({
+  stopTypewriter
+});
 </script>
 
 <style scoped>

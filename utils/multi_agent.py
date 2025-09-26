@@ -221,15 +221,18 @@ async def get_multi_agent_executor(user_id=None, collection_name=None, mcp_confi
         ]
     )
 
-    # 创建代理和执行器
+    # 创建代理和执行器，优化流式配置
     multi_agent = create_tool_calling_agent(model, tools, prompt)
     agent_executor = AgentExecutor(
         agent=multi_agent,
         tools=tools,
         verbose=True,
-        streaming=True,
+        streaming=True,  # 确保开启流式输出
         handle_parsing_errors=True,
-        stream_runnable=True
+        stream_runnable=True,  # 确保Runnable也支持流式
+        return_intermediate_steps=True,  # 返回中间步骤以支持工具调用追踪
+        max_iterations=10,  # 限制最大迭代次数
+        early_stopping_method="generate"  # 优化停止策略
     )
 
     return agent_executor
@@ -263,10 +266,11 @@ async def chat_with_multi_agent_original(msg, session_id, user_id=None, collecti
 
     return res['output']
 
-# 流式版本的聊天函数
+# 改进的流式版本的聊天函数，利用LangChain的事件系统实现真正的流式输出
 async def stream_chat_with_multi_agent(msg, session_id, user_id=None, collection_name=None, mcp_config_path=None):
     """
-    使用多代理与用户聊天（流式版本）
+    使用多代理与用户聊天（优化的流式版本）
+    使用LangChain的事件系统实现真正的字符级流式输出
     :param msg: 用户消息
     :param session_id: 会话ID
     :param user_id: 用户ID
@@ -285,96 +289,173 @@ async def stream_chat_with_multi_agent(msg, session_id, user_id=None, collection
         history_messages_key="chat_history",
     )
 
-    # 存储工具调用信息
+    # 存储工具调用信息和流式文本
     tool_calls = []
+    streaming_text = ""
+    is_streaming_response = False
     
-    # 使用LangChain的内置流式API
-    async for chunk in agent_with_chat_history.astream(
-        {"question": msg},
-        config={"configurable": {"session_id": session_id}},
-    ):
-        # 处理不同类型的流式输出
-        if isinstance(chunk, dict):
-            # 处理工具调用事件
-            if "actions" in chunk:
-                # 工具调用开始
-                for action in chunk["actions"]:
-                    # 根据debug结果，action是一个AgentAction对象，具有tool和tool_input属性
-                    if hasattr(action, 'tool') and hasattr(action, 'tool_input'):
-                        tool_call_info = {
-                            "type": "tool_call",
-                            "name": action.tool,
-                            "input": action.tool_input,
-                            "log": getattr(action, 'log', '')
-                        }
-                        tool_calls.append(tool_call_info)
-                        yield f"[TOOL_CALL_START]{json.dumps(tool_call_info)}[TOOL_CALL_END]"
+    try:
+        # 使用LangChain的高级事件API进行更精细的流式控制
+        async for event in agent_with_chat_history.astream_events(
+            {"question": msg},
+            config={
+                "configurable": {"session_id": session_id},
+                "callbacks": []  # 使用默认回调
+            },
+            version="v2"  # 使用更新的事件API版本
+        ):
+            event_type = event.get("event", "")
+            event_name = event.get("name", "")
+            event_data = event.get("data", {})
             
-            elif "steps" in chunk:
-                # 工具调用完成
-                for step in chunk["steps"]:
-                    # 根据debug结果，step是一个元组 (action, observation)
-                    if isinstance(step, tuple) and len(step) >= 2:
-                        action, observation = step
-                        # action是一个AgentAction对象
-                        if hasattr(action, 'tool') and hasattr(action, 'tool_input'):
-                            tool_result_info = {
-                                "type": "tool_result",
-                                "name": action.tool,
-                                "input": action.tool_input,
-                                "output": str(observation)
-                            }
-                            yield f"[TOOL_RESULT_START]{json.dumps(tool_result_info)}[TOOL_RESULT_END]"
+            # 调试：记录所有事件类型
+            logging.debug(f"Event: {event_type}, Name: {event_name}, Data keys: {list(event_data.keys()) if isinstance(event_data, dict) else 'not dict'}")
             
-            elif "intermediate_step" in chunk:
-                # 中间步骤
-                for step in chunk["intermediate_step"]:
-                    # 根据debug结果，step是一个元组 (action, observation)
-                    if isinstance(step, tuple) and len(step) >= 2:
-                        action, observation = step
-                        # action是一个AgentAction对象
-                        if hasattr(action, 'tool') and hasattr(action, 'tool_input'):
-                            intermediate_info = {
-                                "type": "intermediate_step",
-                                "name": action.tool,
-                                "input": action.tool_input,
-                                "output": str(observation)
-                            }
-                            yield f"[INTERMEDIATE_START]{json.dumps(intermediate_info)}[INTERMEDIATE_END]"
+            # 处理不同类型的事件
+            if event_type == "on_tool_start":
+                # 工具开始调用
+                tool_name = event_name
+                tool_input = event_data.get("input", {})
+                
+                logging.info(f"🔧 工具开始调用: {tool_name}, 输入: {tool_input}")
+                
+                tool_call_info = {
+                    "type": "tool_call",
+                    "name": tool_name,
+                    "input": tool_input,
+                    "status": "started"
+                }
+                tool_calls.append(tool_call_info)
+                yield f"[TOOL_CALL_START]{json.dumps(tool_call_info, ensure_ascii=False)}[TOOL_CALL_END]"
             
-            # 处理模型最终响应
-            elif "output" in chunk and chunk["output"]:
-                # 模型最终输出
-                yield f"[MODEL_RESPONSE]{chunk['output']}"
+            elif event_type == "on_tool_end":
+                # 工具调用结束
+                tool_name = event_name
+                tool_output = event_data.get("output", "")
+                
+                logging.info(f"📋 工具调用结束: {tool_name}, 输出: {tool_output}")
+                
+                tool_result_info = {
+                    "type": "tool_result",
+                    "name": tool_name,
+                    "output": str(tool_output),
+                    "status": "completed"
+                }
+                yield f"[TOOL_RESULT_START]{json.dumps(tool_result_info, ensure_ascii=False)}[TOOL_RESULT_END]"
+                
+                # 更新tool_calls中对应的工具状态
+                for tool_call in tool_calls:
+                    if tool_call.get("name") == tool_name:
+                        tool_call["status"] = "completed"
+                        tool_call["output"] = str(tool_output)
+                        break
             
-            # 处理其他字段
-            elif "content" in chunk and chunk["content"]:
-                yield f"[MODEL_RESPONSE]{chunk['content']}"
+            elif event_type == "on_llm_stream":
+                # LLM流式输出 - 这是真正的字符级流式输出
+                is_streaming_response = True
+                chunk_content = event_data.get("chunk", {})
+                
+                # 处理OpenAI格式的流式chunk
+                if hasattr(chunk_content, 'content') and chunk_content.content:
+                    content = chunk_content.content
+                    streaming_text += content
+                    yield f"[MODEL_RESPONSE]{content}"
+                
+                # 处理字符串格式的chunk
+                elif isinstance(chunk_content, str) and chunk_content:
+                    streaming_text += chunk_content
+                    yield f"[MODEL_RESPONSE]{chunk_content}"
+                
+                # 处理字典格式的chunk
+                elif isinstance(chunk_content, dict):
+                    if "content" in chunk_content and chunk_content["content"]:
+                        content = chunk_content["content"]
+                        streaming_text += content
+                        yield f"[MODEL_RESPONSE]{content}"
+                    elif "text" in chunk_content and chunk_content["text"]:
+                        text = chunk_content["text"]
+                        streaming_text += text
+                        yield f"[MODEL_RESPONSE]{text}"
             
-            elif "messages" in chunk and chunk["messages"]:
-                # 处理消息列表
-                for msg in chunk["messages"]:
-                    if hasattr(msg, 'content') and msg.content:
-                        yield f"[MODEL_RESPONSE]{msg.content}"
+            elif event_type == "on_llm_end":
+                # LLM输出结束
+                # 如果streaming_text为空，尝试从event_data中获取完整输出
+                if not streaming_text:
+                    output = event_data.get("output", {})
+                    if hasattr(output, 'content'):
+                        streaming_text = output.content
+                        # 实现字符级流式输出
+                        if streaming_text and not is_streaming_response:
+                            # 如果没有收到流式chunk，模拟字符级输出
+                            for i, char in enumerate(streaming_text):
+                                yield f"[MODEL_RESPONSE]{char}"
+                                # 可选：添加小延迟来模拟打字机效果
+                                if i % 10 == 9:  # 每10个字符检查一下
+                                    await asyncio.sleep(0.01)  # 非常小的延迟
+                    elif isinstance(output, dict) and "content" in output:
+                        streaming_text = output["content"]
+                        if streaming_text and not is_streaming_response:
+                            # 模拟字符级输出
+                            for i, char in enumerate(streaming_text):
+                                yield f"[MODEL_RESPONSE]{char}"
+                                if i % 10 == 9:
+                                    await asyncio.sleep(0.01)
+            
+            elif event_type == "on_agent_action":
+                # 代理动作（中间步骤）
+                action = event_data.get("action", {})
+                if hasattr(action, 'tool') and hasattr(action, 'tool_input'):
+                    intermediate_info = {
+                        "type": "intermediate_step",
+                        "name": action.tool,
+                        "input": action.tool_input,
+                        "log": getattr(action, 'log', '')
+                    }
+                    yield f"[INTERMEDIATE_START]{json.dumps(intermediate_info)}[INTERMEDIATE_END]"
+            
+            elif event_type == "on_chain_end":
+                # 链结束，检查是否是agent_executor的最终输出
+                if event_name == "AgentExecutor":
+                    output = event_data.get("output", {})
+                    if isinstance(output, dict) and "output" in output:
+                        final_output = output["output"]
+                        # 如果没有通过流式获取到内容，使用最终输出
+                        if not streaming_text and final_output:
+                            # 实现字符级流式输出
+                            for i, char in enumerate(final_output):
+                                yield f"[MODEL_RESPONSE]{char}"
+                                if i % 10 == 9:
+                                    await asyncio.sleep(0.01)
         
-        elif hasattr(chunk, 'content'):
-            # 如果是消息对象，提取content
-            if chunk.content:
-                yield f"[MODEL_RESPONSE]{chunk.content}"
-        
-        elif hasattr(chunk, 'text'):
-            # 处理有text属性的对象
-            if chunk.text:
-                yield f"[MODEL_RESPONSE]{chunk.text}"
-        
-        elif chunk is not None and str(chunk).strip():
-            # 其他情况直接yield chunk（如果不是None且不为空）
-            yield f"[MODEL_RESPONSE]{str(chunk)}"
+        # 发送工具调用总结信息 - 但不作为MODEL_RESPONSE发送
+        if tool_calls:
+            summary_info = {
+                "type": "tool_summary",
+                "tool_calls": tool_calls
+            }
+            # 注意：这里不再yield，避免出现在用户消息中
+            logging.info(f"工具调用总结: {len(tool_calls)} 个工具被调用")
     
-    # 发送工具调用总结信息
-    if tool_calls:
-        summary_info = {
-            "type": "tool_summary",
-            "tool_calls": tool_calls
-        }
-        yield f"[TOOL_SUMMARY_START]{json.dumps(summary_info)}[TOOL_SUMMARY_END]"
+    except Exception as e:
+        logging.error(f"流式聊天过程中出错: {e}")
+        # 如果流式处理失败，回退到原始实现
+        logging.info("回退到原始流式实现")
+        yield f"[MODEL_RESPONSE]抱歉，处理您的请求时遇到了一些问题。让我重新尝试...\n\n"
+        
+        # 回退逻辑：使用原始的astream方法
+        try:
+            async for chunk in agent_with_chat_history.astream(
+                {"question": msg},
+                config={"configurable": {"session_id": session_id}},
+            ):
+                if isinstance(chunk, dict) and "output" in chunk and chunk["output"]:
+                    # 对回退的输出也实现字符级流式
+                    output_text = chunk["output"]
+                    for i, char in enumerate(output_text):
+                        yield f"[MODEL_RESPONSE]{char}"
+                        if i % 5 == 4:  # 回退时稍微快一些
+                            await asyncio.sleep(0.005)
+                    break
+        except Exception as fallback_error:
+            logging.error(f"回退实现也失败: {fallback_error}")
+            yield f"[MODEL_RESPONSE]抱歉，系统遇到了技术问题，请稍后重试。"

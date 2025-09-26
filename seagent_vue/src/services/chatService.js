@@ -117,40 +117,141 @@ export const sendMessage = async (chatId, userId, message, role = 'user', collec
   }
 };
 
-// 发送消息到指定对话（流式模式）
-export const sendStreamMessage = async (chatId, userId, message, role = 'user', collection_name = null) => {
-  // 构建请求载荷
-  let payload = {
+// 发送消息到指定对话（改进的流式模式，支持打字机效果）
+export const sendStreamMessage = async (
+  { chatId, userId, message, role = 'user', collection_name = null },
+  callbacks
+) => {
+  const { onMessage, onToolCall, onDone, onError, onTyping } = callbacks || {};
+
+  const payload = {
     chat_id: chatId,
     message,
-    role
+    role,
+    user_id: String(userId),
+    ...(collection_name && { collection_name }),
   };
 
-  // 如果userId存在且不是空，添加到请求中（确保作为字符串类型）
-  if (userId !== undefined && userId !== null && userId !== '') {
-    // 确保user_id是字符串类型
-    payload.user_id = String(userId);
+  try {
+    const token = localStorage.getItem('seagent_token');
+    const response = await fetch(`${api.defaults.baseURL}/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { 'Authorization': `Bearer ${token}` }),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullResponse = "";
+    let isFirstMessage = true;
+
+    const processStream = async () => {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          // 流结束，调用onDone回调
+          if (onDone) onDone(fullResponse);
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary !== -1) {
+          const chunk = buffer.substring(0, boundary);
+          buffer = buffer.substring(boundary + 2);
+
+          if (chunk.startsWith('data: ')) {
+            const data = chunk.substring(6);
+            
+            console.log('📨 接收到流式数据:', data.substring(0, 100), data.length > 100 ? '...' : ''); // 调试日志
+
+            // 处理流结束标记
+            if (data === '[DONE]') {
+              if (onDone) onDone(fullResponse);
+              return;
+            }
+            
+            try {
+              // 处理模型响应内容 - 支持字符级流式输出
+              if (data.startsWith('[MODEL_RESPONSE]')) {
+                const content = data.slice('[MODEL_RESPONSE]'.length);
+                if (content) {
+                  // 第一次收到消息时，调用onTyping启动打字机效果
+                  if (isFirstMessage && onTyping) {
+                    onTyping(true);
+                    isFirstMessage = false;
+                  }
+                  
+                  // 每个字符或小块内容都通过onMessage传递
+                  if (onMessage) {
+                    onMessage(content);
+                  }
+                  fullResponse += content;
+                }
+              } 
+              // 处理工具调用 - 这里是关键！
+              else if (data.startsWith('[TOOL_CALL_START]')) {
+                console.log('🔧 chatService检测到工具调用:', data); // 调试日志
+                if (onToolCall) {
+                  onToolCall(data);
+                } else {
+                  console.warn('⚠️ onToolCall回调未定义!');
+                }
+              } 
+              else if (data.startsWith('[TOOL_RESULT_START]')) {
+                console.log('📋 chatService检测到工具结果:', data); // 调试日志
+                if (onToolCall) {
+                  onToolCall(data);
+                } else {
+                  console.warn('⚠️ onToolCall回调未定义!');
+                }
+              } 
+              else if (data.startsWith('[INTERMEDIATE_START]')) {
+                if (onToolCall) onToolCall(data);
+              }
+              else if (data.startsWith('[TOOL_SUMMARY_START]')) {
+                if (onToolCall) onToolCall(data);
+              }
+              // 处理其他格式的内容
+              else if (data.trim()) {
+                // 第一次收到消息时，调用onTyping启动打字机效果
+                if (isFirstMessage && onTyping) {
+                  onTyping(true);
+                  isFirstMessage = false;
+                }
+                
+                if (onMessage) {
+                  onMessage(data);
+                }
+                fullResponse += data;
+              }
+            } catch (e) {
+              const err = new Error(`解析流式数据块失败: ${e.message}`);
+              console.error('解析错误:', e);
+              if (onError) onError(err);
+            }
+          }
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+    };
+
+    await processStream();
+
+  } catch (error) {
+    console.error('流式请求错误:', error);
+    if (onError) onError(error);
   }
-
-  // 如果指定了知识库集合名称，添加到请求中
-  if (collection_name) {
-    payload.collection_name = collection_name;
-  }
-
-  // 获取认证token
-  const token = localStorage.getItem('seagent_token');
-
-  // 使用fetch API创建流式请求
-  const response = await fetch(`${api.defaults.baseURL}/chat/stream`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token && { 'Authorization': `Bearer ${token}` })
-    },
-    body: JSON.stringify(payload)
-  });
-
-  return response.body.getReader();
 };
 
 // 更新对话标题

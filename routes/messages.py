@@ -374,7 +374,13 @@ async def get_chat_messages(
             "user_id": msg.user_id,
             "message": msg.message,
             "timestamp": msg.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-            "role": msg.role
+            "role": msg.role,
+            "tool_calls": msg.tool_calls,
+            # 添加工具相关字段
+            "tool_name": msg.tool_name,
+            "tool_input": msg.tool_input,
+            "tool_output": msg.tool_output,
+            "tool_status": msg.tool_status
         } for msg in messages
     ]
 
