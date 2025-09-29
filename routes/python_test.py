@@ -332,7 +332,7 @@ async def submit_code(
             )) + [submission]  # 包含当前提交
             
             for sub in all_submissions:
-                sub_question = PythonQuestion.get_by_id(sub.question_id)
+                sub_question = PythonQuestion.get_by_id(sub.question_id.id)
                 review_data = json.loads(sub.review_result) if sub.review_result else {}
                 
                 session_data_for_agent.append({
@@ -370,8 +370,8 @@ async def submit_code(
         
         return PythonSubmissionResponse(
             id=submission.id,
-            session_id=submission.session_id,
-            question_id=submission.question_id,
+            session_id=submission.session_id.id,
+            question_id=submission.question_id.id,
             user_code=submission.user_code,
             execution_result=basic_result.get("output", "") or basic_result.get("error", "执行完成"),
             test_results={"message": "已完成智能体评估", "score": final_score},
@@ -414,7 +414,7 @@ async def get_test_report(
                 session_data_for_agent = []
                 
                 for sub in all_submissions:
-                    sub_question = PythonQuestion.get_by_id(sub.question_id)
+                    sub_question = PythonQuestion.get_by_id(sub.question_id.id)
                     review_data = json.loads(sub.review_result) if sub.review_result else {}
                     
                     session_data_for_agent.append({
@@ -445,17 +445,54 @@ async def get_test_report(
         total_score = sum(s.score for s in submissions)
         average_score = total_score / total_questions if total_questions > 0 else 0
         
+        # 生成基础难度分析数据
+        difficulty_stats = {}
+        for submission in submissions:
+            question = PythonQuestion.get_by_id(submission.question_id.id)
+            difficulty = question.difficulty
+            if difficulty not in difficulty_stats:
+                difficulty_stats[difficulty] = {
+                    "attempted": 0,
+                    "passed": 0,
+                    "scores": [],
+                    "average_score": 0,
+                    "pass_rate": 0,
+                    "difficulty_name": f"难度 {difficulty}"
+                }
+            
+            difficulty_stats[difficulty]["attempted"] += 1
+            if submission.is_passed:
+                difficulty_stats[difficulty]["passed"] += 1
+            difficulty_stats[difficulty]["scores"].append(submission.score)
+        
+        # 计算每个难度的统计数据
+        for difficulty, stats in difficulty_stats.items():
+            stats["average_score"] = sum(stats["scores"]) / len(stats["scores"]) if stats["scores"] else 0
+            stats["pass_rate"] = stats["passed"] / stats["attempted"] if stats["attempted"] > 0 else 0
+
+        # 确定最强和最弱领域
+        strongest_area = None
+        weakest_area = None
+        if difficulty_stats:
+            strongest_area = max(difficulty_stats.keys(), 
+                               key=lambda x: difficulty_stats[x]["pass_rate"]) if difficulty_stats else None
+            weakest_area = min(difficulty_stats.keys(), 
+                              key=lambda x: difficulty_stats[x]["pass_rate"]) if len(difficulty_stats) > 1 else None
+        
+        # 获取智能体的难度分析或使用基础分析
+        ai_difficulty_analysis = ai_report.get("difficulty_performance", {})
+        
         # 构建符合Pydantic模型的报告数据
         report_data = {
             "session_id": session_id,
             "total_score": average_score,
             "questions_attempted": total_questions,
             "questions_passed": passed_questions,
-            "difficulty_analysis": ai_report.get("difficulty_performance", {
-                "difficulty_stats": {},
-                "strongest_area": None,
-                "weakest_area": None
-            }),
+            "difficulty_analysis": {
+                "difficulty_stats": ai_difficulty_analysis.get("difficulty_stats", difficulty_stats),
+                "strongest_area": ai_difficulty_analysis.get("strongest_area", strongest_area),
+                "weakest_area": ai_difficulty_analysis.get("weakest_area", weakest_area)
+            },
             "skill_assessment": {
                 "overall_skill_score": ai_report.get("skill_score", average_score),
                 "skill_level": ai_report.get("overall_skill_level", "中级"),
@@ -470,7 +507,7 @@ async def get_test_report(
         
         # 构建详细结果
         for submission in submissions:
-            question = PythonQuestion.get_by_id(submission.question_id)
+            question = PythonQuestion.get_by_id(submission.question_id.id)
             test_data = json.loads(submission.test_results) if submission.test_results else {}
             review_data = json.loads(submission.review_result) if submission.review_result else {}
             
@@ -515,7 +552,7 @@ async def generate_test_report(session_id: int, user_id: int) -> Dict[str, Any]:
         detailed_results = []
         
         for submission in submissions:
-            question = PythonQuestion.get_by_id(submission.question_id)
+            question = PythonQuestion.get_by_id(submission.question_id.id)
             test_data = json.loads(submission.test_results) if submission.test_results else {}
             review_data = json.loads(submission.review_result) if submission.review_result else {}
             

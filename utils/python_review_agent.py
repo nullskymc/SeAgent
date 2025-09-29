@@ -278,11 +278,48 @@ class PythonCodeReviewAgent:
             skill_level = "初级"
         else:
             skill_level = "入门"
+        
+        # 生成难度分析
+        difficulty_stats = {}
+        for submission in session_data:
+            difficulty = submission.get('difficulty', 1)
+            if difficulty not in difficulty_stats:
+                difficulty_stats[difficulty] = {
+                    "attempted": 0,
+                    "passed": 0,
+                    "scores": [],
+                    "average_score": 0,
+                    "pass_rate": 0,
+                    "difficulty_name": f"难度 {difficulty}"
+                }
+            
+            difficulty_stats[difficulty]["attempted"] += 1
+            if submission.get('passed', False):
+                difficulty_stats[difficulty]["passed"] += 1
+            difficulty_stats[difficulty]["scores"].append(submission.get('score', 0))
+        
+        # 计算统计数据
+        for difficulty, stats in difficulty_stats.items():
+            stats["average_score"] = sum(stats["scores"]) / len(stats["scores"]) if stats["scores"] else 0
+            stats["pass_rate"] = stats["passed"] / stats["attempted"] if stats["attempted"] > 0 else 0
+        
+        # 找出最强和最弱领域
+        strongest_area = None
+        weakest_area = None
+        if difficulty_stats:
+            strongest_area = max(difficulty_stats.keys(), 
+                               key=lambda x: difficulty_stats[x]["pass_rate"]) if difficulty_stats else None
+            weakest_area = min(difficulty_stats.keys(), 
+                              key=lambda x: difficulty_stats[x]["pass_rate"]) if len(difficulty_stats) > 1 else None
             
         return {
             "overall_skill_level": skill_level,
             "skill_score": avg_score,
-            "difficulty_performance": {},
+            "difficulty_performance": {
+                "difficulty_stats": difficulty_stats,
+                "strongest_area": strongest_area,
+                "weakest_area": weakest_area
+            },
             "strengths": ["具备Python基础知识"],
             "improvement_areas": ["提高代码质量", "增强算法思维"],
             "learning_path": ["继续练习编程题目", "学习Python最佳实践"],

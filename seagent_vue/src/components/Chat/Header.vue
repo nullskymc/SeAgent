@@ -11,37 +11,30 @@
         />
         <span class="app-title">智能代码助手</span>
         
-        <!-- 导航菜单 - 改为选项卡模式 -->
-        <el-tabs v-model="currentTab" @tab-change="handleTabChange" class="nav-tabs">
-          <el-tab-pane label="聊天" name="chat">
-            <template #label>
-              <span class="tab-label">
-                <el-icon><ChatLineRound /></el-icon>
-                聊天
-              </span>
-            </template>
-          </el-tab-pane>
-          <el-tab-pane label="Python测试" name="python-test">
-            <template #label>
-              <span class="tab-label">
-                <el-icon><Edit /></el-icon>
-                Python测试
-              </span>
-            </template>
-          </el-tab-pane>
-        </el-tabs>
-        
-        <!-- 外部页面导航 -->
-        <el-menu mode="horizontal" :router="true" :default-active="activeRoute" class="nav-menu">
-          <el-menu-item index="/tools">
+        <!-- 统一导航菜单 -->
+        <el-menu 
+          mode="horizontal" 
+          :default-active="activeMenuItem" 
+          @select="handleMenuSelect"
+          class="nav-menu"
+        >
+          <el-menu-item index="chat">
+            <el-icon><ChatLineRound /></el-icon>
+            <span>聊天</span>
+          </el-menu-item>
+          <el-menu-item index="python-test">
+            <el-icon><Edit /></el-icon>
+            <span>Python测试</span>
+          </el-menu-item>
+          <el-menu-item index="tools">
             <el-icon><Tools /></el-icon>
             <span>工具箱</span>
           </el-menu-item>
-          <el-menu-item index="/mcp-tools">
+          <el-menu-item index="mcp-tools">
             <el-icon><Connection /></el-icon>
             <span>MCP工具</span>
           </el-menu-item>
-          <el-menu-item index="/knowledge">
+          <el-menu-item index="knowledge">
             <el-icon><DataAnalysis /></el-icon>
             <span>知识库管理</span>
           </el-menu-item>
@@ -107,16 +100,15 @@ const route = useRoute()
 const collapsed = ref(false)
 const isDark = ref(false)
 const username = ref('用户')
-const currentTab = ref(props.activeTab)
 
-// 计算当前活动路由
-const activeRoute = computed(() => {
-  return route.path
-})
-
-// 监听props变化
-watch(() => props.activeTab, (newTab) => {
-  currentTab.value = newTab
+// 计算当前活动菜单项
+const activeMenuItem = computed(() => {
+  // 如果当前在主页面，根据activeTab确定选中项
+  if (route.path === '/main') {
+    return props.activeTab
+  }
+  // 对于其他路由，去掉前缀"/"
+  return route.path.substring(1)
 })
 
 // 在组件挂载时获取用户信息
@@ -133,9 +125,18 @@ const toggleCollapse = () => {
   emit('toggle-collapse', collapsed.value)
 }
 
-// 处理选项卡切换
-const handleTabChange = (tabName) => {
-  emit('switch-tab', tabName)
+// 统一处理菜单选择
+const handleMenuSelect = (index) => {
+  if (index === 'chat' || index === 'python-test') {
+    // 内部页面切换，发射事件给Main组件处理
+    if (route.path !== '/main') {
+      router.push('/main')
+    }
+    emit('switch-tab', index)
+  } else {
+    // 外部页面路由跳转
+    router.push(`/${index}`)
+  }
 }
 
 // 主题切换处理
@@ -198,29 +199,10 @@ const handleLogout = () => {
   }
 }
 
-.nav-tabs {
-  margin-left: 20px;
-  margin-right: 20px;
-}
-
-.nav-tabs :deep(.el-tabs__header) {
-  margin: 0;
-  border-bottom: none;
-}
-
-.nav-tabs :deep(.el-tabs__nav-wrap::after) {
-  display: none;
-}
-
-.tab-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .nav-menu {
   border-bottom: none;
-  min-width: 300px;
+  margin-left: 20px;
+  flex: 1;
 }
 
 .right-section {
