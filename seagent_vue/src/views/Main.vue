@@ -1,6 +1,6 @@
 <template>
   <div class="main-page">
-    <Header @toggle-collapse="toggleDrawer" />
+    <Header @toggle-collapse="toggleDrawer" @switch-tab="handleTabSwitch" :active-tab="activeTab" />
     <div class="main-container">
       <el-drawer
         v-model="isDrawerOpen"
@@ -9,13 +9,21 @@
         :with-header="false"
         size="240px"
         custom-class="history-drawer"
+        v-show="activeTab === 'chat'"
       >
         <ChatHistory ref="chatHistoryRef" @select-chat="handleSelectChatInDrawer" />
       </el-drawer>
 
-      <div class="chat-wrapper">
-        <div class="chat-container">
+      <!-- 内容区域 -->
+      <div class="content-wrapper">
+        <!-- 聊天页面 -->
+        <div v-show="activeTab === 'chat'" class="chat-container">
           <Chat :current-chat-id="currentChatId" class="chat-main" @title-updated="handleTitleUpdate" />
+        </div>
+        
+        <!-- Python测试页面 -->
+        <div v-show="activeTab === 'python-test'" class="python-test-container">
+          <PythonTest />
         </div>
       </div>
     </div>
@@ -28,11 +36,13 @@ import { ref } from 'vue';
 import Header from '@/components/Chat/Header.vue';
 import ChatHistory from '@/components/Chat/ChatHistory.vue';
 import Chat from '@/components/Chat/Chat.vue';
+import PythonTest from '@/components/PythonTest/PythonTest.vue';
 import Footer from '@/components/Footer.vue';
 
 const isDrawerOpen = ref(true); // 默认打开
 const currentChatId = ref(null);
 const chatHistoryRef = ref(null);
+const activeTab = ref('chat'); // 默认显示聊天页面
 
 const toggleDrawer = () => {
   isDrawerOpen.value = !isDrawerOpen.value;
@@ -55,6 +65,15 @@ const handleTitleUpdate = () => {
     chatHistoryRef.value.fetchChatList();
   }
 };
+
+// 处理选项卡切换
+const handleTabSwitch = (tab) => {
+  activeTab.value = tab;
+  // 如果切换到非聊天页面，关闭侧边栏
+  if (tab !== 'chat') {
+    isDrawerOpen.value = false;
+  }
+};
 </script>
 
 <style>
@@ -64,7 +83,7 @@ const handleTitleUpdate = () => {
   flex-direction: column;
   overflow: hidden;
   background-color: var(--el-bg-color-page);
-  position: relative; /* 添加此行以作为页脚定位的上下文 */
+  position: relative;
 }
 
 .main-container {
@@ -74,11 +93,11 @@ const handleTitleUpdate = () => {
   height: calc(100vh - 60px);
   position: relative;
   overflow: hidden;
-  padding-bottom: 80px; /* 为悬浮页脚留出空间 */
-  box-sizing: border-box; /* 确保padding正确计算 */
+  padding-bottom: 80px;
+  box-sizing: border-box;
 }
 
-.chat-wrapper {
+.content-wrapper {
   flex: 1;
   min-width: 0;
 }
@@ -87,6 +106,14 @@ const handleTitleUpdate = () => {
   width: 100%;
   height: 100%;
   padding: 0;
+}
+
+.python-test-container {
+  width: 100%;
+  height: 100%;
+  padding: 20px;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 /* 自定义抽屉样式 */

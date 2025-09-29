@@ -11,12 +11,28 @@
         />
         <span class="app-title">智能代码助手</span>
         
-        <!-- 导航菜单 - 修改为始终显示所有选项 -->
+        <!-- 导航菜单 - 改为选项卡模式 -->
+        <el-tabs v-model="currentTab" @tab-change="handleTabChange" class="nav-tabs">
+          <el-tab-pane label="聊天" name="chat">
+            <template #label>
+              <span class="tab-label">
+                <el-icon><ChatLineRound /></el-icon>
+                聊天
+              </span>
+            </template>
+          </el-tab-pane>
+          <el-tab-pane label="Python测试" name="python-test">
+            <template #label>
+              <span class="tab-label">
+                <el-icon><Edit /></el-icon>
+                Python测试
+              </span>
+            </template>
+          </el-tab-pane>
+        </el-tabs>
+        
+        <!-- 外部页面导航 -->
         <el-menu mode="horizontal" :router="true" :default-active="activeRoute" class="nav-menu">
-          <el-menu-item index="/main">
-            <el-icon><ChatLineRound /></el-icon>
-            <span>聊天</span>
-          </el-menu-item>
           <el-menu-item index="/tools">
             <el-icon><Tools /></el-icon>
             <span>工具箱</span>
@@ -61,7 +77,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   User,
@@ -71,11 +87,19 @@ import {
   DataAnalysis,
   Tools,
   Connection,
-  Menu
+  Menu,
+  Edit
 } from '@element-plus/icons-vue'
 import { logout, getUserInfo } from '@/services/auth'
 
-const emit = defineEmits(['toggle-collapse'])
+const props = defineProps({
+  activeTab: {
+    type: String,
+    default: 'chat'
+  }
+})
+
+const emit = defineEmits(['toggle-collapse', 'switch-tab'])
 const router = useRouter()
 const route = useRoute()
 
@@ -83,10 +107,16 @@ const route = useRoute()
 const collapsed = ref(false)
 const isDark = ref(false)
 const username = ref('用户')
+const currentTab = ref(props.activeTab)
 
 // 计算当前活动路由
 const activeRoute = computed(() => {
   return route.path
+})
+
+// 监听props变化
+watch(() => props.activeTab, (newTab) => {
+  currentTab.value = newTab
 })
 
 // 在组件挂载时获取用户信息
@@ -101,6 +131,11 @@ onMounted(() => {
 const toggleCollapse = () => {
   collapsed.value = !collapsed.value
   emit('toggle-collapse', collapsed.value)
+}
+
+// 处理选项卡切换
+const handleTabChange = (tabName) => {
+  emit('switch-tab', tabName)
 }
 
 // 主题切换处理
@@ -163,11 +198,29 @@ const handleLogout = () => {
   }
 }
 
+.nav-tabs {
+  margin-left: 20px;
+  margin-right: 20px;
+}
+
+.nav-tabs :deep(.el-tabs__header) {
+  margin: 0;
+  border-bottom: none;
+}
+
+.nav-tabs :deep(.el-tabs__nav-wrap::after) {
+  display: none;
+}
+
+.tab-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .nav-menu {
   border-bottom: none;
-  margin-left: 20px;
-  /* 确保导航菜单有足够空间显示所有选项 */
-  min-width: 400px;
+  min-width: 300px;
 }
 
 .right-section {
